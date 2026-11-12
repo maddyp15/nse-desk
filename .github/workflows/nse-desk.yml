@@ -1,0 +1,70 @@
+name: nse-desk
+on:
+  schedule:
+    - cron: "10 3 * * 1-5"    # 08:40 IST pre-market
+    - cron: "20 4 * * 1-5"    # 09:50 IST intraday
+    - cron: "40 10 * * 1-5"   # 16:10 IST post-market
+    - cron: "50 4 * * 6"      # Sat 10:20 IST weekly
+    - cron: "0 2 * * 6"       # Sat 07:30 IST rebuild odds tables
+  workflow_dispatch:
+    inputs:
+      slot:
+        description: "pre, intra, post, weekly or rates"
+        default: "post"
+      flags:
+        description: "optional: --force, --synthetic, --no-telegram"
+        default: ""
+permissions:
+  contents: write
+concurrency:
+  group: nse-desk
+  cancel-in-progress: false
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements.txt
+      - run: pip install -q -r requirements.txt
+      - name: Pick slot
+        id: pick
+        env:
+          SCHED: ${{ github.event.schedule }}
+          PICK: ${{ github.event.inputs.slot }}
+        run: |
+          case "$SCHED" in
+            "10 3 * * 1-5") S=pre;;
+            "20 4 * * 1-5") S=intra;;
+            "40 10 * * 1-5") S=post;;
+            "50 4 * * 6") S=weekly;;
+            "0 2 * * 6") S=rates;;
+            *) S="$PICK";;
+          esac
+          [ -z "$S" ] && S=post
+          echo "slot=$S" >> "$GITHUB_OUTPUT"
+          echo "slot: $S"
+      - name: Build odds tables
+        if: steps.pick.outputs.slot == 'rates' || hashFiles('data/base_rates.json') == ''
+        run: python scripts/base_rates.py || true
+      - name: Publish dashboards
+        if: steps.pick.outputs.slot != 'rates'
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          DASHBOARD_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/
+          SLOT: ${{ steps.pick.outputs.slot }}
+          FLAGS: ${{ github.event.inputs.flags }}
+        run: python scripts/publish.py "$SLOT" $FLAGS
+      - name: Commit results
+        run: |
+          git config user.name "nse-desk-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add -A docs data config
+          git diff --cached --quiet && exit 0
+          git commit -q -m "dashboards $(date -u +%F\ %H:%M)"
+          for i in 1 2 3; do git push -q && break || git pull -q --rebase; done
