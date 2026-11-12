@@ -139,19 +139,21 @@ def universe(fake):
             import io
             import requests
             r = requests.get(UNIVERSE_URL, headers={"User-Agent": "Mozilla/5.0"}, timeout=20)
-            syms = pd.read_csv(io.StringIO(r.text))["Symbol"].dropna().astype(str).str.strip().tolist()
-            if len(syms) > 300:
+            u = pd.read_csv(io.StringIO(r.text))
+            u = u[[c for c in ("Symbol", "Industry") if c in u.columns]].dropna(subset=["Symbol"])
+            if len(u) > 300:
                 os.makedirs(os.path.dirname(path), exist_ok=True)
-                pd.DataFrame({"Symbol": syms}).to_csv(path, index=False)
+                u.to_csv(path, index=False)
         except Exception as exc:
             print("universe refresh failed:", type(exc).__name__)
     try:
-        syms = pd.read_csv(path)["Symbol"].astype(str).tolist()
+        u = pd.read_csv(path)
+        syms = u["Symbol"].astype(str).str.strip().tolist()
         if len(syms) > 50:
-            return syms, "Nifty 500"
+            return syms, "Nifty 500", (dict(zip(syms, u["Industry"].astype(str))) if "Industry" in u.columns else {})
     except Exception:
         pass
-    return FALLBACK, "built-in large-cap list"
+    return FALLBACK, "built-in large-cap list", {}
 
 
 # ---------------- indicators ----------------
@@ -422,6 +424,30 @@ def breadth(rows):
             "gainers": pick(liq[:5], ["s", "c", "chg"]), "losers": pick(liq[-5:][::-1], ["s", "c", "chg"])}
 
 
+def industry_rows(rows, indmap):
+    groups = {}
+    for r in rows:
+        k = indmap.get(r["s"])
+        if k and k != "nan":
+            groups.setdefault(k, []).append(r)
+    out = []
+    for k, rs in groups.items():
+        if len(rs) < 4:
+            continue
+
+        def avg(f):
+            vals = [r[f] for r in rs if r[f] is not None]
+            return round(float(np.mean(vals)), 1) if vals else 0.0
+
+        ws = sorted(rs, key=lambda r: -(r["w"] or 0))
+        a50 = 100 * sum(1 for r in rs if r["a50"]) / len(rs)
+        w, rs_avg = avg("w"), avg("rsi")
+        out.append({"name": k, "n": len(rs), "chg": avg("chg"), "w": w, "m": avg("m"), "rsi": round(rs_avg), "a50": round(a50),
+                    "best": ws[0]["s"], "best_w": ws[0]["w"], "worst": ws[-1]["s"], "worst_w": ws[-1]["w"],
+                    "bias": "Leading" if (w > 0 and a50 >= 60 and rs_avg > 55) else ("Lagging" if (w < 0 and a50 < 40) else "Neutral")})
+    return sorted(out, key=lambda z: -z["w"])
+
+
 # ---------------- rendering ----------------
 BG, CARD, TXT, MUT = "#0b1220", "#141f33", "#e8eef7", "#8a9bb3"
 UP, DN, ACC, AMB = "#2ecc8f", "#ff6b6b", "#5aa9ff", "#f5b942"
@@ -622,6 +648,31 @@ def page_market(view):
     return p
 
 
+def page_industries(view):
+    rows = view["industries"][:24]
+    H = 15 + 2.3 * len(rows) + 5
+    p = Page(H, view, "Sector analysis")
+    p.card(4, 8, 92, 7 + 2.3 * len(rows))
+    p.t(5.5, 10, "SECTOR ANALYSIS BY INDUSTRY", 10, ACC, "bold")
+    p.t(94.5, 10, "Nifty 500 stocks, equal-weight averages, ranked by 1-week change", 7.6, MUT, ha="right")
+    for lab, x, ha in (("Industry", 5.5, "left"), ("Stocks", 38, "right"), ("1D", 44.5, "right"), ("1W", 51, "right"),
+                       ("1M", 57.5, "right"), ("RSI", 62, "right"), (">50DMA", 69, "right"), ("Best of week", 71, "left"),
+                       ("Worst of week", 81.5, "left"), ("View", 94.5, "right")):
+        p.t(x, 12.4, lab, 7.6, MUT, ha=ha)
+    for j, r in enumerate(rows):
+        y = 14.7 + j * 2.3
+        p.t(5.5, y, r["name"][:32], 8.2, TXT, "bold")
+        p.t(38, y, r["n"], 8.2, MUT, ha="right")
+        for k, x in (("chg", 44.5), ("w", 51), ("m", 57.5)):
+            p.t(x, y, pc(r[k], 1), 8.4, col(r[k]), "bold" if k == "w" else "normal", "right")
+        p.t(62, y, r["rsi"], 8.2, TXT, ha="right")
+        p.t(69, y, f"{r['a50']}%", 8.2, UP if r["a50"] >= 60 else DN if r["a50"] < 40 else AMB, ha="right")
+        p.t(71, y, f"{r['best'][:9]} {pc(r['best_w'], 0)}", 7.4, UP)
+        p.t(81.5, y, f"{r['worst'][:9]} {pc(r['worst_w'], 0)}", 7.4, DN)
+        p.t(94.5, y, r["bias"], 7.8, tagcol(r["bias"]), "bold", "right")
+    return p
+
+
 LCOL = {"s": ("Stock", 0), "c": ("Close", 22), "chg": ("Chg%", 31), "m": ("1M%", 31), "x": ("Vol x", 39), "pm": ("vs 12M high", 42),
         "cr": ("Rs cr", 48), "d52": ("vs 52wH", 58), "dath": ("vs ATH", 58), "rsi": ("RSI", 65), "ma": ("MAs", 72), "tag": ("Read", 92)}
 
@@ -669,6 +720,8 @@ def render(view, slot):
     pages = [page_index(view)]
     if view["sectors"]:
         pages.append(page_market(view))
+    if view.get("industries"):
+        pages.append(page_industries(view))
     ps = page_stocks(view)
     if ps:
         pages.append(ps)
@@ -762,8 +815,8 @@ def main():
     if stale and "--force" not in sys.argv and not fake:
         print(f"no bar for {today} yet (holiday or delayed data): nothing published")
         return
-    syms, uni = universe(fake)
-    lists, br = {}, None
+    syms, uni, indmap = universe(fake)
+    lists, br, inds = {}, None, []
     if slot != "pre" or True:
         sd = src.many([s + ".NS" for s in syms], "2y", "1d")
         ath_path = os.path.join(ROOT, "data", "ath.json")
@@ -779,7 +832,7 @@ def main():
             errors.append("stock data unavailable")
         if len(sd) < 0.8 * len(syms):
             errors.append(f"stock data for {len(sd)} of {len(syms)} symbols")
-        lists, br = build_lists(slot, rows), breadth(rows)
+        lists, br, inds = build_lists(slot, rows), breadth(rows), industry_rows(rows, indmap)
     glob = []
     for nm, t in GLOBAL.items():
         d = daily.get(t)
@@ -794,7 +847,7 @@ def main():
             "rates_built": (rates or {}).get("built"), "universe": uni, "errors": errors,
             "vix": {"close": r2(vix), "chg": r2(vixchg), "regime": vix_bucket(vix)},
             "sentiment": list(sentiment(indices[0]["chg"], vixchg)),
-            "indices": indices, "globals": glob, "sectors": sector_rows(daily), "breadth": br, "lists": lists}
+            "indices": indices, "globals": glob, "sectors": sector_rows(daily), "breadth": br, "industries": inds, "lists": lists}
     digest = hashlib.sha1(json.dumps([[i["close"], i["high"], i["low"]] for i in indices]).encode()).hexdigest()
     dup = state.get("hash", {}).get(slot) == digest
     save(os.path.join(OUT, f"{slot}.json"), view)
