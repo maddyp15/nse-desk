@@ -116,6 +116,11 @@ function sectorTiles(v){
   return '<div class="g4">'+s.map(function(x){var val=x[key]||0,a=0.12+0.45*Math.min(Math.abs(val)/3,1);
     return '<div class="tile" style="background:rgba('+(val>=0?"46,204,143,":"255,107,107,")+a+')"><span style="display:flex;justify-content:space-between"><span>'+esc(x.name)+'</span><span class="sm '+tc(x.bias)+'">'+esc(x.bias)+"</span></span><b>"+pc(x[key])+'</b><span class="sm">1D '+pc(x.chg,1)+" &middot; 1W "+pc(x.w,1)+" &middot; 1M "+pc(x.m,1)+" &middot; RSI "+x.rsi+"</span></div>"}).join("")+"</div>";
 }
+function indTable(v){
+  var h='<div class="sec">Sector analysis by industry (Nifty 500, equal-weight, ranked by 1-week change)</div><div class="card"><table><thead><tr><th>Industry</th><th>Stocks</th><th>1D %</th><th>1W %</th><th>1M %</th><th>RSI</th><th>Above 50DMA</th><th>Best of week</th><th>Worst of week</th><th>View</th></tr></thead><tbody>';
+  v.industries.forEach(function(r){h+="<tr><td>"+esc(r.name)+"</td><td>"+r.n+'</td><td class="'+cl(r.chg)+'">'+pc(r.chg,1)+'</td><td class="'+cl(r.w)+'"><b>'+pc(r.w,1)+'</b></td><td class="'+cl(r.m)+'">'+pc(r.m,1)+"</td><td>"+r.rsi+"</td><td>"+r.a50+'%</td><td class="up">'+esc(r.best)+" "+pc(r.best_w,0)+'</td><td class="dn">'+esc(r.worst)+" "+pc(r.worst_w,0)+'</td><td class="'+tc(r.bias)+'">'+esc(r.bias)+"</td></tr>"});
+  return h+"</tbody></table></div>";
+}
 function breadthCard(v){
   var b=v.breadth;if(!b)return "";var t=b.adv+b.dec;
   function mv(a){return a.map(function(r){return '<div style="display:flex;justify-content:space-between"><span>'+esc(r.s)+'</span><span class="'+cl(r.chg)+'">'+pc(r.chg,1)+"</span></div>"}).join("")}
@@ -132,6 +137,7 @@ function view(v,only){
     h+='<div class="sec">Index plan</div><div class="grid">'+v.indices.slice(0,2).map(planCard).join("")+"</div>";
     h+='<div class="grid" style="margin-top:12px">'+mtfCard(v)+'<div class="card"><h2><span>Global cues</span></h2><table><tbody>'+v.globals.map(function(g){return "<tr><td>"+esc(g.name)+"</td><td>"+f(g.close)+'</td><td class="'+cl(g.chg)+'">'+pc(g.chg,1)+'</td><td class="mut sm">'+esc(g.date)+"</td></tr>"}).join("")+"</tbody></table></div></div>";
     if(v.sectors.length)h+='<div class="sec">Sectors ('+(v.slot=="weekly"?"week":"day")+" change)</div>"+sectorTiles(v);
+    if(v.industries&&v.industries.length)h+=indTable(v);
     h+='<div class="sec">Breadth and movers</div>'+breadthCard(v);
   }
   var ls=Object.keys(v.lists||{});LISTS=v.lists||{};
