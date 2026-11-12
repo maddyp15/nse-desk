@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>NSE Desk</title>
+<style>
+:root{--bg:#0b1220;--card:#162033;--txt:#e8eef7;--mut:#8a9bb3;--up:#2ecc8f;--dn:#ff6b6b;--acc:#5aa9ff}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--txt);font:15px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+header{display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center;padding:12px 16px;position:sticky;top:0;background:var(--bg);z-index:2}
+h1{font-size:20px;margin:0;color:var(--acc)}
+nav{display:flex;gap:6px;overflow-x:auto}
+button,select{background:var(--card);color:var(--txt);border:0;border-radius:8px;padding:8px 12px;font:inherit;cursor:pointer;white-space:nowrap}
+button.on{background:var(--acc);color:#06101f;font-weight:600}
+main{padding:0 16px 40px;max-width:1200px;margin:auto}
+.meta{color:var(--mut);font-size:13px;margin:4px 0 12px}
+img.poster{width:100%;border-radius:12px;margin:0 0 14px;display:block}
+.grid{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(320px,1fr))}
+.card{background:var(--card);border-radius:12px;padding:14px;overflow-x:auto}
+.card h2{font-size:14px;color:var(--acc);margin:0 0 4px}
+.rule{font-size:12px;color:var(--mut);margin:0 0 6px}
+table{width:100%;border-collapse:collapse;font-size:14px}
+th,td{padding:6px 4px;text-align:right;border-bottom:1px solid #223049}
+th{color:var(--mut);font-weight:500;cursor:pointer;font-size:12px}
+th:first-child,td:first-child{text-align:left;font-weight:600}
+.up{color:var(--up)}.dn{color:var(--dn)}
+a{color:var(--acc)}
+.sec{margin:16px 0 8px;font-size:15px;color:var(--acc);font-weight:600}
+footer{color:var(--mut);font-size:12px;margin-top:24px}
+</style>
+</head>
+<body>
+<header><h1>NSE Desk</h1><nav id="tabs"></nav><select id="day" aria-label="Date"></select></header>
+<main id="app"><p class="meta">Loading...</p></main>
+<script>
+var TABS=[["pre","Pre-market"],["intra","Intraday"],["post","Post-market"],["stocks","Stocks to watch"],["weekly","Weekly"]];
+var COLS={s:"Stock",c:"Close",chg:"Chg %",x:"Vol x",cr:"Rs cr",d52:"vs 52wH %",dath:"vs ATH %",w:"1W %",m:"1M %"};
+var tab=location.hash.slice(1)||"post",day="",LISTS={};
+function $(s){return document.querySelector(s)}
+function esc(s){return String(s==null?"":s).replace(/[&<>"]/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]})}
+function get(p){return fetch(p+"?t="+Date.now()).then(function(r){return r.ok?r.json():null}).catch(function(){return null})}
+function cls(k,v){return (k=="chg"||k=="w"||k=="m")&&v!=null?(v>=0?"up":"dn"):""}
+function rowsHtml(rows,cols){return rows.map(function(r){return "<tr>"+cols.map(function(k){
+  if(k=="s")return '<td><a target="_blank" rel="noopener" href="https://www.tradingview.com/chart/?symbol=NSE:'+encodeURIComponent(r.s)+'">'+esc(r.s)+"</a></td>";
+  return '<td class="'+cls(k,r[k])+'">'+(r[k]==null?"-":Number(r[k]).toLocaleString("en-IN"))+"</td>"}).join("")+"</tr>"}).join("")}
+function listCard(key,l){
+  var cols=Object.keys(COLS).filter(function(k){return l.rows.some(function(r){return r[k]!=null})});
+  var h='<div class="card"><h2>'+esc(l.title)+" ("+l.rows.length+')</h2><p class="rule">'+esc(l.rule)+"</p>";
+  if(!l.rows.length)return h+'<p class="rule">No stocks matched.</p></div>';
+  return h+'<table data-k="'+key+'"><thead><tr>'+cols.map(function(k){return '<th data-c="'+k+'">'+COLS[k]+"</th>"}).join("")+"</tr></thead><tbody>"+rowsHtml(l.rows,cols)+"</tbody></table></div>"}
+function fundCard(f){var ks=Object.keys(f||{});if(!ks.length)return "";
+  return '<div class="card"><h2>Fundamental snapshot</h2><p class="rule">Tag is rule-based: ROE, margin, PE and trend.</p><table><thead><tr><th>Stock</th><th>MCap cr</th><th>PE</th><th>ROE %</th><th>Margin %</th><th>D/E</th><th>Sales YoY %</th><th>Tag</th></tr></thead><tbody>'+
+  ks.map(function(s){var x=f[s];return "<tr><td>"+esc(s)+"</td>"+[x.mcap,x.pe,x.roe,x.margin,x.de,x.growth,x.tag].map(function(v){return "<td>"+(v==null?"-":esc(v))+"</td>"}).join("")+"</tr>"}).join("")+"</tbody></table></div>"}
+function draw(){
+  $("#tabs").innerHTML=TABS.map(function(t){return '<button class="'+(t[0]==tab?"on":"")+'" data-t="'+t[0]+'">'+t[1]+"</button>"}).join("");
+  var slot=tab=="stocks"?"post":tab;
+  get(day?"data/history/"+day+"_"+slot+".json":"data/"+slot+".json").then(function(v){
+    if(!v){$("#app").innerHTML='<p class="meta">No data for this slot yet.</p>';return}
+    LISTS=v.lists||{};
+    var h='<p class="meta">'+esc(v.date)+" "+esc(v.time_ist)+" IST &middot; stock universe: "+esc(v.universe)+(v.rates_built?" &middot; probability tables built "+esc(v.rates_built):"")+
+      ' &middot; <a target="_blank" href="img/'+slot+'.pdf">PDF</a></p>';
+    if(v.errors&&v.errors.length)h+='<p class="dn">Data gaps: '+esc(v.errors.join("; "))+"</p>";
+    var ps=v.posters||[];
+    if(!day){if(tab=="stocks")ps=ps.slice(2);h+=ps.map(function(p){return '<img class="poster" alt="dashboard" src="img/'+p+"?t="+encodeURIComponent(v.generated_utc)+'">'}).join("")}
+    else h+='<p class="meta">Images are kept for the latest run only; tables below are from '+esc(day)+".</p>";
+    h+='<div class="sec">Stocks to watch (tap a column to sort)</div><div class="grid">'+Object.keys(LISTS).map(function(k){return listCard(k,LISTS[k])}).join("")+fundCard(v.fund)+"</div>";
+    if(v.news&&v.news.length)h+='<div class="sec">Headlines</div><div class="card">'+v.news.map(function(n){return '<p style="margin:4px 0"><a target="_blank" rel="noopener" href="'+esc(n.link)+'">'+esc(n.title)+"</a></p>"}).join("")+"</div>";
+    $("#app").innerHTML=h+"<footer>Data: Yahoo Finance, NSE. Levels and scenarios are rule-based reference levels; probabilities are historical frequencies. Not investment advice.</footer>"})}
+document.addEventListener("click",function(e){
+  var b=e.target.closest("[data-t]");if(b){tab=b.dataset.t;location.hash=tab;draw();return}
+  var th=e.target.closest("th[data-c]");if(!th)return;
+  var t=th.closest("table"),l=LISTS[t.dataset.k],c=th.dataset.c,dir=th.dataset.d=="1"?-1:1;th.dataset.d=dir==1?"1":"0";
+  var rows=l.rows.slice().sort(function(a,b){return c=="s"?dir*a.s.localeCompare(b.s):dir*((b[c]==null?-1e9:b[c])-(a[c]==null?-1e9:a[c]))});
+  t.tBodies[0].innerHTML=rowsHtml(rows,[].map.call(t.querySelectorAll("th"),function(x){return x.dataset.c}))});
+$("#day").addEventListener("change",function(e){day=e.target.value;draw()});
+get("data/state.json").then(function(s){var d=((s&&s.dates)||[]).slice().reverse();
+  $("#day").innerHTML='<option value="">Latest</option>'+d.map(function(x){return "<option>"+esc(x)+"</option>"}).join("");draw()});
+</script>
+</body>
+</html>
