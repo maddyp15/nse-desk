@@ -5,76 +5,155 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>NSE Desk</title>
 <style>
-:root{--bg:#0b1220;--card:#162033;--txt:#e8eef7;--mut:#8a9bb3;--up:#2ecc8f;--dn:#ff6b6b;--acc:#5aa9ff}
+:root{--bg:#0b1220;--card:#141f33;--txt:#e8eef7;--mut:#8a9bb3;--up:#2ecc8f;--dn:#ff6b6b;--acc:#5aa9ff;--amb:#f5b942}
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--txt);font:15px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
 header{display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center;padding:12px 16px;position:sticky;top:0;background:var(--bg);z-index:2}
 h1{font-size:20px;margin:0;color:var(--acc)}
 nav{display:flex;gap:6px;overflow-x:auto}
-button,select{background:var(--card);color:var(--txt);border:0;border-radius:8px;padding:8px 12px;font:inherit;cursor:pointer;white-space:nowrap}
-button.on{background:var(--acc);color:#06101f;font-weight:600}
-main{padding:0 16px 40px;max-width:1200px;margin:auto}
+nav button,select{background:var(--card);color:var(--txt);border:0;border-radius:8px;padding:8px 12px;font:inherit;cursor:pointer;white-space:nowrap}
+nav button.on{background:var(--acc);color:#06101f;font-weight:600}
+main{padding:0 16px 40px;max-width:1180px;margin:auto}
 .meta{color:var(--mut);font-size:13px;margin:4px 0 12px}
-img.poster{width:100%;border-radius:12px;margin:0 0 14px;display:block}
-.grid{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(320px,1fr))}
+.grid{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(310px,1fr))}
+.g4{display:grid;gap:10px;grid-template-columns:repeat(auto-fill,minmax(170px,1fr))}
 .card{background:var(--card);border-radius:12px;padding:14px;overflow-x:auto}
-.card h2{font-size:14px;color:var(--acc);margin:0 0 4px}
-.rule{font-size:12px;color:var(--mut);margin:0 0 6px}
+.card h2{font-size:13px;letter-spacing:.04em;color:var(--acc);margin:0 0 8px;display:flex;justify-content:space-between;gap:8px}
+.big{font-size:26px;font-weight:700;display:flex;justify-content:space-between;align-items:baseline}
+.big small{font-size:16px}
+.up{color:var(--up)}.dn{color:var(--dn)}.mut{color:var(--mut)}.acc{color:var(--acc)}.amb{color:var(--amb)}
+.sm{font-size:12.5px}
+.bar{display:grid;grid-template-columns:1fr 80px 96px;gap:8px;align-items:center;margin:5px 0;font-size:14px}
+.bar i{display:block;height:8px;border-radius:4px;background:var(--bg);overflow:hidden}
+.bar i b{display:block;height:100%}
+.bar em{font-style:normal;text-align:right;font-weight:600}
 table{width:100%;border-collapse:collapse;font-size:14px}
-th,td{padding:6px 4px;text-align:right;border-bottom:1px solid #223049}
+th,td{padding:6px 5px;text-align:right;border-bottom:1px solid #1f2d47;white-space:nowrap}
 th{color:var(--mut);font-weight:500;cursor:pointer;font-size:12px}
 th:first-child,td:first-child{text-align:left;font-weight:600}
-.up{color:var(--up)}.dn{color:var(--dn)}
-a{color:var(--acc)}
+tr.last td{background:#3a2f10;color:var(--amb);font-weight:700}
+.rule{font-size:12px;color:var(--mut);margin:0 0 6px}
 .sec{margin:16px 0 8px;font-size:15px;color:var(--acc);font-weight:600}
+.tile{border-radius:10px;padding:10px}
+.tile b{display:block;font-size:19px}
+.warn{background:#3a2f10;color:var(--amb);border-radius:8px;padding:8px 12px;margin:8px 0}
+a{color:var(--acc)}
 footer{color:var(--mut);font-size:12px;margin-top:24px}
+svg{width:100%;height:auto;display:block}
 </style>
 </head>
 <body>
-<header><h1>NSE Desk</h1><nav id="tabs"></nav><select id="day" aria-label="Date"></select></header>
+<header>
+  <h1>NSE Desk</h1>
+  <nav id="tabs"></nav>
+  <select id="day" aria-label="Date"></select>
+</header>
 <main id="app"><p class="meta">Loading...</p></main>
 <script>
-var TABS=[["pre","Pre-market"],["intra","Intraday"],["post","Post-market"],["stocks","Stocks to watch"],["weekly","Weekly"]];
-var COLS={s:"Stock",c:"Close",chg:"Chg %",x:"Vol x",cr:"Rs cr",d52:"vs 52wH %",dath:"vs ATH %",w:"1W %",m:"1M %"};
-var tab=location.hash.slice(1)||"post",day="",LISTS={};
+var TABS=[["pre","Pre-market"],["intra","Intraday"],["post","Post-market"],["stocks","Stocks to watch"],["weekly","Weekly"],["guide","Guide"]];
+var tab=location.hash.slice(1)||"post", day="", LISTS={};
 function $(s){return document.querySelector(s)}
 function esc(s){return String(s==null?"":s).replace(/[&<>"]/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]})}
+function f(v,d){if(v==null)return "-";d=d==null?2:d;return Number(v).toLocaleString("en-IN",{minimumFractionDigits:d,maximumFractionDigits:d})}
+function pc(v,d){if(v==null)return "-";return (v>=0?"+":"")+Number(v).toFixed(d==null?2:d)+"%"}
+function cl(v){return v==null?"":(v>=0?"up":"dn")}
+function tc(s){return (s=="Bullish"||s=="Leading"||s=="Strong trend")?"up":(s=="Bearish"||s=="Lagging"||s=="Weak"||s=="Bearish divergence")?"dn":"amb"}
 function get(p){return fetch(p+"?t="+Date.now()).then(function(r){return r.ok?r.json():null}).catch(function(){return null})}
-function cls(k,v){return (k=="chg"||k=="w"||k=="m")&&v!=null?(v>=0?"up":"dn"):""}
-function rowsHtml(rows,cols){return rows.map(function(r){return "<tr>"+cols.map(function(k){
-  if(k=="s")return '<td><a target="_blank" rel="noopener" href="https://www.tradingview.com/chart/?symbol=NSE:'+encodeURIComponent(r.s)+'">'+esc(r.s)+"</a></td>";
-  return '<td class="'+cls(k,r[k])+'">'+(r[k]==null?"-":Number(r[k]).toLocaleString("en-IN"))+"</td>"}).join("")+"</tr>"}).join("")}
-function listCard(key,l){
-  var cols=Object.keys(COLS).filter(function(k){return l.rows.some(function(r){return r[k]!=null})});
-  var h='<div class="card"><h2>'+esc(l.title)+" ("+l.rows.length+')</h2><p class="rule">'+esc(l.rule)+"</p>";
-  if(!l.rows.length)return h+'<p class="rule">No stocks matched.</p></div>';
-  return h+'<table data-k="'+key+'"><thead><tr>'+cols.map(function(k){return '<th data-c="'+k+'">'+COLS[k]+"</th>"}).join("")+"</tr></thead><tbody>"+rowsHtml(l.rows,cols)+"</tbody></table></div>"}
-function fundCard(f){var ks=Object.keys(f||{});if(!ks.length)return "";
-  return '<div class="card"><h2>Fundamental snapshot</h2><p class="rule">Tag is rule-based: ROE, margin, PE and trend.</p><table><thead><tr><th>Stock</th><th>MCap cr</th><th>PE</th><th>ROE %</th><th>Margin %</th><th>D/E</th><th>Sales YoY %</th><th>Tag</th></tr></thead><tbody>'+
-  ks.map(function(s){var x=f[s];return "<tr><td>"+esc(s)+"</td>"+[x.mcap,x.pe,x.roe,x.margin,x.de,x.growth,x.tag].map(function(v){return "<td>"+(v==null?"-":esc(v))+"</td>"}).join("")+"</tr>"}).join("")+"</tbody></table></div>"}
+function candles(cs,lv){
+  var W=600,H=220,lo=1e12,hi=0,i,s="";
+  for(i=0;i<cs.length;i++){lo=Math.min(lo,cs[i][3]);hi=Math.max(hi,cs[i][2])}
+  function y(v){return 10+(hi-v)/(hi-lo||1)*(H-20)}
+  [["R1","#ff6b6b"],["P","#8a9bb3"],["S1","#2ecc8f"]].forEach(function(k){var v=lv[k[0]];if(v>=lo&&v<=hi)s+='<line x1="0" x2="'+W+'" y1="'+y(v)+'" y2="'+y(v)+'" stroke="'+k[1]+'" stroke-dasharray="4 4" stroke-width="1"/><text x="'+(W-4)+'" y="'+(y(v)-3)+'" fill="'+k[1]+'" font-size="11" text-anchor="end">'+k[0]+" "+f(v,0)+"</text>"});
+  var bw=(W-20)/cs.length;
+  for(i=0;i<cs.length;i++){var c=cs[i],x=10+i*bw,col=c[4]>=c[1]?"#2ecc8f":"#ff6b6b";
+    s+='<line x1="'+(x+bw*0.35)+'" x2="'+(x+bw*0.35)+'" y1="'+y(c[2])+'" y2="'+y(c[3])+'" stroke="'+col+'"/><rect x="'+x+'" y="'+Math.min(y(c[1]),y(c[4]))+'" width="'+(bw*0.7)+'" height="'+Math.max(Math.abs(y(c[1])-y(c[4])),1)+'" fill="'+col+'"><title>'+c[0]+" O "+c[1]+" H "+c[2]+" L "+c[3]+" C "+c[4]+"</title></rect>"}
+  return '<svg viewBox="0 0 '+W+" "+H+'">'+s+"</svg>";
+}
+function indexCard(i){
+  var h='<div class="card"><h2><span>'+esc(i.name)+'</span><span class="'+tc(i.bias)+'">'+esc(i.bias)+"</span></h2>";
+  h+='<div class="big"><span>'+f(i.close)+'</span><small class="'+cl(i.chg)+'">'+pc(i.chg)+"</small></div>";
+  h+='<div class="mut sm">RSI '+i.rsi+" &middot; 1W "+pc(i.w,1)+" &middot; 1M "+pc(i.m,1)+" &middot; 52w "+f(i.lo52,0)+" - "+f(i.hi52,0)+"</div>";
+  if(i.gap)h+='<div class="'+cl(i.gap.pct)+'">Gap '+pc(i.gap.pct)+' <span class="mut">('+esc(i.gap.kind)+")</span></div>";
+  if(i.or)h+='<div class="mut sm">Opening 15-min range '+f(i.or.lo,0)+" - "+f(i.or.hi,0)+"</div>";
+  if(i.exp)h+='<div class="mut sm">VIX 1-sigma '+esc(i.exp.horizon)+" range "+f(i.exp.lo,0)+" - "+f(i.exp.hi,0)+" (&plusmn;"+i.exp.pct+"%)</div>";
+  if(i.week)h+='<div class="sm">Week '+pc(i.week.chg)+" &middot; high "+f(i.week.hi,0)+" &middot; low "+f(i.week.lo,0)+"</div>";
+  return h+"</div>";
+}
+function planCard(i){
+  var h='<div class="card"><h2><span>'+esc(i.name)+" key levels</span></h2><table><tbody>";
+  i.ladder.forEach(function(r){var last=r.k=="LAST";h+='<tr class="'+(last?"last":"")+'"><td class="'+(last?"":(r.v>i.close?"dn":"up"))+'">'+esc(r.k)+"</td><td>"+f(r.v)+'</td><td class="mut">'+pc((r.v/i.close-1)*100)+"</td></tr>"});
+  h+='</tbody></table><div class="sec">Scenarios</div>';
+  i.scenarios.forEach(function(s,n){h+='<div style="margin:6px 0"><b class="'+["up","dn","amb"][n]+'">'+esc(s.name)+"</b>: "+esc(s.trigger)+'<div class="mut sm">targets '+esc(s.targets)+" &middot; invalid: "+esc(s.invalid)+"</div></div>"});
+  h+='<div class="sec">Historical odds</div>';
+  if(i.probs&&i.probs.length){h+='<div class="mut sm">'+esc(i.setup)+"</div>";
+    i.probs.forEach(function(p){h+='<div class="bar"><span>'+esc(p.label)+'</span><i><b style="width:'+p.p+"%;background:var(--"+(p.p>=50?"up":"dn")+')"></b></i><em>'+p.p.toFixed(0)+'% <span class="mut">n='+p.n+"</span></em></div>"});
+    if(i.range)h+='<div class="mut sm">'+esc(i.range.text)+": "+i.range.med+" ("+i.range.lo+" to "+i.range.hi+")</div>"}
+  else h+='<div class="mut">Probability table not built yet.</div>';
+  h+='<div class="sec">Last 40 sessions</div>'+candles(i.candles,i.levels)+"</div>";
+  return h;
+}
+function mtfCard(v){
+  var a=v.indices.slice(0,2),h='<div class="card"><h2><span>Multi-timeframe trend</span></h2><table><thead><tr><th>Timeframe</th>';
+  a.forEach(function(i){h+="<th>"+esc(i.name)+"</th>"});h+="</tr></thead><tbody>";
+  (a[0].mtf||[]).forEach(function(m){h+="<tr><td>"+esc(m.tf)+"</td>";a.forEach(function(i){var z=(i.mtf||[]).filter(function(q){return q.tf==m.tf})[0];h+=z?'<td class="'+tc(z.tag)+'">'+esc(z.tag)+' <span class="mut">RSI '+z.rsi+"</span></td>":"<td>-</td>"});h+="</tr>"});
+  return h+"</tbody></table></div>";
+}
+var COLS={s:"Stock",c:"Close",chg:"Chg %",m:"1M %",x:"Vol x",pm:"vs 12M high %",cr:"Rs cr",d52:"vs 52wH %",dath:"vs ATH %",rsi:"RSI",ma:"MAs /9",tag:"Read"};
+function rowsHtml(rows,cols){return rows.map(function(r){return "<tr>"+cols.map(function(c){var v=r[c];
+  if(c=="s")return '<td><a target="_blank" rel="noopener" href="https://www.tradingview.com/chart/?symbol=NSE:'+encodeURIComponent(v)+'">'+esc(v)+"</a></td>";
+  if(c=="tag")return '<td class="'+tc(v)+'">'+esc(v)+"</td>";
+  if(c=="chg"||c=="m"||c=="pm")return '<td class="'+cl(v)+'">'+pc(v,1)+"</td>";
+  if(c=="x")return '<td class="amb">'+(v==null?"-":v+"x")+"</td>";
+  return "<td>"+(v==null?"-":c=="c"?f(v,1):c=="cr"?f(v,0):v)+"</td>"}).join("")+"</tr>"}).join("")}
+function listCard(k,l){
+  var h='<div class="card"><h2><span>'+esc(l.title)+"</span><span>"+l.rows.length+'</span></h2><p class="rule">'+esc(l.rule)+"</p>";
+  if(!l.rows.length)return h+'<div class="mut">No stocks matched.</div></div>';
+  var cols=Object.keys(COLS).filter(function(c){return c in l.rows[0]});
+  return h+'<table data-k="'+k+'"><thead><tr>'+cols.map(function(c){return '<th data-c="'+c+'">'+COLS[c]+"</th>"}).join("")+"</tr></thead><tbody>"+rowsHtml(l.rows,cols)+"</tbody></table></div>";
+}
+function sectorTiles(v){
+  var key=v.slot=="weekly"?"w":"chg",s=v.sectors.slice().sort(function(a,b){return (b[key]||0)-(a[key]||0)});
+  return '<div class="g4">'+s.map(function(x){var val=x[key]||0,a=0.12+0.45*Math.min(Math.abs(val)/3,1);
+    return '<div class="tile" style="background:rgba('+(val>=0?"46,204,143,":"255,107,107,")+a+')"><span style="display:flex;justify-content:space-between"><span>'+esc(x.name)+'</span><span class="sm '+tc(x.bias)+'">'+esc(x.bias)+"</span></span><b>"+pc(x[key])+'</b><span class="sm">1D '+pc(x.chg,1)+" &middot; 1W "+pc(x.w,1)+" &middot; 1M "+pc(x.m,1)+" &middot; RSI "+x.rsi+"</span></div>"}).join("")+"</div>";
+}
+function breadthCard(v){
+  var b=v.breadth;if(!b)return "";var t=b.adv+b.dec;
+  function mv(a){return a.map(function(r){return '<div style="display:flex;justify-content:space-between"><span>'+esc(r.s)+'</span><span class="'+cl(r.chg)+'">'+pc(r.chg,1)+"</span></div>"}).join("")}
+  return '<div class="grid"><div class="card"><h2><span>Market breadth ('+b.n+" liquid stocks, "+esc(v.universe)+')</span></h2><div style="display:flex;height:10px;border-radius:5px;overflow:hidden"><div style="width:'+(100*b.adv/t)+'%;background:var(--up)"></div><div style="flex:1;background:var(--dn)"></div></div><div style="display:flex;justify-content:space-between;margin:6px 0"><b class="up">Advances '+b.adv+'</b><b class="dn">Declines '+b.dec+"</b></div><table><tbody><tr><td>Above 50-day average</td><td>"+b.a50+"%</td></tr><tr><td>Above 200-day average</td><td>"+b.a200+"%</td></tr><tr><td>At or within 0.5% of 52-week high</td><td>"+b.nh+"</td></tr><tr><td>RSI below 30</td><td>"+b.near_low+'</td></tr></tbody></table></div><div class="card"><h2><span class="up">Top gainers</span></h2>'+mv(b.gainers)+'</div><div class="card"><h2><span class="dn">Top losers</span></h2>'+mv(b.losers)+"</div></div>";
+}
+function view(v,only){
+  if(!v)return '<p class="meta">No data for this slot yet.</p>';
+  var h='<p class="meta">'+esc(v.date)+" "+esc(v.time_ist)+" IST &middot; published "+esc(v.generated_utc)+" UTC"+(v.rates_built?" &middot; odds tables built "+esc(v.rates_built):"")+' &middot; <a href="img/'+v.slot+'.pdf" target="_blank">PDF</a> &middot; <a href="img/'+v.slot+'_1.png" target="_blank">image</a></p>';
+  if(v.synthetic)h+='<div class="warn">Test run with synthetic prices. Not real market data.</div>';
+  if(v.errors&&v.errors.length)h+='<div class="warn">Data gaps: '+esc(v.errors.join("; "))+"</div>";
+  if(!only){
+    h+='<div class="grid">'+v.indices.map(indexCard).join("")+"</div>";
+    h+='<div class="card" style="margin-top:12px"><h2><span>India VIX '+f(v.vix.close)+" ("+pc(v.vix.chg,1)+')</span><span class="'+tc(v.sentiment[0])+'">'+esc(v.sentiment[0])+"</span></h2>"+esc(v.sentiment[1])+"</div>";
+    h+='<div class="sec">Index plan</div><div class="grid">'+v.indices.slice(0,2).map(planCard).join("")+"</div>";
+    h+='<div class="grid" style="margin-top:12px">'+mtfCard(v)+'<div class="card"><h2><span>Global cues</span></h2><table><tbody>'+v.globals.map(function(g){return "<tr><td>"+esc(g.name)+"</td><td>"+f(g.close)+'</td><td class="'+cl(g.chg)+'">'+pc(g.chg,1)+'</td><td class="mut sm">'+esc(g.date)+"</td></tr>"}).join("")+"</tbody></table></div></div>";
+    if(v.sectors.length)h+='<div class="sec">Sectors ('+(v.slot=="weekly"?"week":"day")+" change)</div>"+sectorTiles(v);
+    h+='<div class="sec">Breadth and movers</div>'+breadthCard(v);
+  }
+  var ls=Object.keys(v.lists||{});LISTS=v.lists||{};
+  if(ls.length)h+='<div class="sec">Stocks to watch</div><div class="grid" style="grid-template-columns:1fr">'+ls.map(function(k){return listCard(k,v.lists[k])}).join("")+"</div>";
+  return h;
+}
+var GUIDE='<div class="grid"><div class="card"><h2><span>Intraday timing guide (IST)</span></h2><table><tbody><tr><td>09:00-09:15</td><td style="text-align:left">Pre-open. Observe only.</td></tr><tr><td>09:15-09:30</td><td style="text-align:left">Mark the opening range and gap. No trade.</td></tr><tr><td>09:30-10:00</td><td style="text-align:left">Wait for a 15-minute close beyond R1 or S1.</td></tr><tr><td>10:00-11:30</td><td style="text-align:left">Best window for confirmed setups.</td></tr><tr><td>11:30-13:30</td><td style="text-align:left">Usually range-bound. Avoid fresh entries.</td></tr><tr><td>13:30-15:00</td><td style="text-align:left">Second directional move is possible.</td></tr><tr><td>15:00-15:30</td><td style="text-align:left">Exit intraday positions.</td></tr></tbody></table></div><div class="card"><h2><span>Market + VIX read</span></h2><table><thead><tr><th>Market</th><th>VIX</th><th>Read</th></tr></thead><tbody><tr><td>Rising</td><td>Falling</td><td class="up">Bullish</td></tr><tr><td>Rising</td><td>Rising</td><td class="dn">Bearish divergence</td></tr><tr><td>Falling</td><td>Rising</td><td class="dn">Bearish</td></tr><tr><td>Falling</td><td>Stable</td><td class="amb">Possible reversal</td></tr><tr><td>Sideways</td><td>Erratic</td><td class="mut">No clear signal</td></tr></tbody></table></div><div class="card"><h2><span>Checklist before any trade</span></h2><div>1. Price has closed beyond the trigger level.<br>2. Higher timeframe trend agrees.<br>3. Stop-loss and quantity are fixed before entry.<br>4. Risk per trade is at most 1-2% of capital.<br>5. Reward is at least 1.5 times the risk.</div></div><div class="card"><h2><span>How the numbers are made</span></h2><div class="sm">Levels are classic pivots from the previous session (weekly pivots on Saturday). The VIX range is one standard deviation. Odds are how often the same setup led to that outcome over about 15 years, with the sample size n. Stock lists use the Nifty 500 with a liquidity floor. Not included: option chain, open interest, PCR, FII/DII flows and GIFT Nifty.</div></div></div>';
 function draw(){
   $("#tabs").innerHTML=TABS.map(function(t){return '<button class="'+(t[0]==tab?"on":"")+'" data-t="'+t[0]+'">'+t[1]+"</button>"}).join("");
+  var foot='<footer>Source: Yahoo Finance; index quotes can lag about 15 minutes. Probabilities are historical frequencies, not forecasts. Not investment advice.</footer>';
+  if(tab=="guide"){$("#app").innerHTML=GUIDE+foot;return}
   var slot=tab=="stocks"?"post":tab;
-  get(day?"data/history/"+day+"_"+slot+".json":"data/"+slot+".json").then(function(v){
-    if(!v){$("#app").innerHTML='<p class="meta">No data for this slot yet.</p>';return}
-    LISTS=v.lists||{};
-    var h='<p class="meta">'+esc(v.date)+" "+esc(v.time_ist)+" IST &middot; stock universe: "+esc(v.universe)+(v.rates_built?" &middot; probability tables built "+esc(v.rates_built):"")+
-      ' &middot; <a target="_blank" href="img/'+slot+'.pdf">PDF</a></p>';
-    if(v.errors&&v.errors.length)h+='<p class="dn">Data gaps: '+esc(v.errors.join("; "))+"</p>";
-    var ps=v.posters||[];
-    if(!day){if(tab=="stocks")ps=ps.slice(2);h+=ps.map(function(p){return '<img class="poster" alt="dashboard" src="img/'+p+"?t="+encodeURIComponent(v.generated_utc)+'">'}).join("")}
-    else h+='<p class="meta">Images are kept for the latest run only; tables below are from '+esc(day)+".</p>";
-    h+='<div class="sec">Stocks to watch (tap a column to sort)</div><div class="grid">'+Object.keys(LISTS).map(function(k){return listCard(k,LISTS[k])}).join("")+fundCard(v.fund)+"</div>";
-    if(v.news&&v.news.length)h+='<div class="sec">Headlines</div><div class="card">'+v.news.map(function(n){return '<p style="margin:4px 0"><a target="_blank" rel="noopener" href="'+esc(n.link)+'">'+esc(n.title)+"</a></p>"}).join("")+"</div>";
-    $("#app").innerHTML=h+"<footer>Data: Yahoo Finance, NSE. Levels and scenarios are rule-based reference levels; probabilities are historical frequencies. Not investment advice.</footer>"})}
+  get(day?"data/history/"+day+"_"+slot+".json":"data/"+slot+".json").then(function(v){$("#app").innerHTML=view(v,tab=="stocks")+foot});
+}
 document.addEventListener("click",function(e){
   var b=e.target.closest("[data-t]");if(b){tab=b.dataset.t;location.hash=tab;draw();return}
-  var th=e.target.closest("th[data-c]");if(!th)return;
-  var t=th.closest("table"),l=LISTS[t.dataset.k],c=th.dataset.c,dir=th.dataset.d=="1"?-1:1;th.dataset.d=dir==1?"1":"0";
-  var rows=l.rows.slice().sort(function(a,b){return c=="s"?dir*a.s.localeCompare(b.s):dir*((b[c]==null?-1e9:b[c])-(a[c]==null?-1e9:a[c]))});
-  t.tBodies[0].innerHTML=rowsHtml(rows,[].map.call(t.querySelectorAll("th"),function(x){return x.dataset.c}))});
+  var th=e.target.closest("th[data-c]");if(th){var t=th.closest("table"),l=LISTS[t.dataset.k],c=th.dataset.c,dir=th.dataset.d=="1"?-1:1;th.dataset.d=dir==1?"1":"0";
+    var rows=l.rows.slice().sort(function(a,b){return (c=="s"||c=="tag")?dir*String(a[c]).localeCompare(String(b[c])):dir*((b[c]==null?-1e9:b[c])-(a[c]==null?-1e9:a[c]))});
+    var cols=[].map.call(t.querySelectorAll("th"),function(x){return x.dataset.c});t.tBodies[0].innerHTML=rowsHtml(rows,cols)}
+});
 $("#day").addEventListener("change",function(e){day=e.target.value;draw()});
-get("data/state.json").then(function(s){var d=((s&&s.dates)||[]).slice().reverse();
+get("data/state.json").then(function(s){var d=(s&&s.dates||[]).slice().reverse();
   $("#day").innerHTML='<option value="">Latest</option>'+d.map(function(x){return "<option>"+esc(x)+"</option>"}).join("");draw()});
 </script>
 </body>
