@@ -487,7 +487,8 @@ def page_index(view):
         p.t(x + w - 1.5, 10.3, iv["bias"], 10, tagcol(iv["bias"]), "bold", "right")
         p.t(x + 1.5, 14, f"{iv['close']:,.2f}", 17, TXT, "bold")
         p.t(x + w - 1.5, 14, pc(iv["chg"]), 12, col(iv["chg"]), "bold", "right")
-        p.t(x + 1.5, 17.4, f"RSI {iv['rsi']}  |  1W {pc(iv['w'], 1)}  |  1M {pc(iv['m'], 1)}  |  52w {n0(iv['lo52'])}-{n0(iv['hi52'])}", 7.8, MUT)
+        p.t(x + 1.5, 16.8, f"RSI {iv['rsi']} | 1W {pc(iv['w'], 1)} | 1M {pc(iv['m'], 1)}", 7.2, MUT)
+        p.t(x + 1.5, 18.4, f"52-week range {n0(iv['lo52'])} - {n0(iv['hi52'])}", 7.2, MUT)
     vx, s = view["vix"], view["sentiment"]
     p.card(4, 21, 92, 6)
     p.t(5.5, 23, "INDIA VIX", 8.5, MUT, "bold")
@@ -596,7 +597,7 @@ def page_market(view):
         p.t(x + 21, y + 1.9, s["bias"], 8, tagcol(s["bias"]), "bold", "right")
         p.t(x + 1.2, y + 4.6, pc(s[key]), 13, TXT, "bold")
         p.t(x + 21, y + 4.6, n0(s["close"]), 9, TXT, ha="right")
-        p.t(x + 1.2, y + 7.1, f"1D {pc(s['chg'], 1)}  1W {pc(s['w'], 1)}  1M {pc(s['m'], 1)}  RSI {s['rsi']:.0f}", 7.3, TXT)
+        p.t(x + 1.2, y + 7.1, f"1D {pc(s['chg'], 1)}  1W {pc(s['w'], 1)}  1M {pc(s['m'], 1)}  RSI {s['rsi']:.0f}", 6.4, TXT)
     y = 8 + rows * 9.5 + 1
     if b:
         p.card(4, y, 45, 21)
