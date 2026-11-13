@@ -18,7 +18,8 @@ Option chain, OI, PCR, IV, Greeks, FII/DII flows and GIFT Nifty. Broker data mus
 - Built and tested on 13 Nov, delivered to the user as `trading-os-market-desk-and-options.zip` (not written by Claude; the PC link failed):
   - native responsive `MarketDeskPanel.jsx` showing one slot per task, `lib/marketDesk.js` and test, task times 08:55 / 10:00 / 16:25 (weekly Monday 08:30);
   - options desk: `backend/app/options_desk.py`, route `GET /api/market/options-desk?instrument=NIFTY|BANKNIFTY`, `tests/test_options_desk.py`, `OptionsDeskPanel.jsx` (PCR OI/volume, max pain, OI walls and change, futures build-up, ATM IV and percentile, skew, Greeks, straddle range, model probabilities). State file `backend/state/options_desk.json` holds the OI baseline and IV history.
-- Backend suite on the copy: 243 passed. Not yet verified inside the running app.
+- Backend suite on the copy: 243 passed. User applied the zip on 13 Nov; OI stats confirmed working in the app.
+- 13 Nov, 21:00: task page redesigned and written directly to the PC: verdict strip (per-index Bullish ... Bearish from six voting signals, plus a Risk-on / Neutral / Risk-off regime), tabs Overview / Options / Sectors / Stocks / Guide, compact tiles in the PREMARKET_MACROS style (`components/deskUi.jsx`). Verdict logic and tests in `lib/marketDesk.js`. Previous versions in `backend/backups/market-desk-2026-11-13-v2/`.
 
 ## Manual run
 Actions > nse-desk > Run workflow. Slot: pre, intra, post, weekly or rates. Add `--force` to run outside the slot window or to post again on the same day.
