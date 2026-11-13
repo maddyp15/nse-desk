@@ -474,13 +474,13 @@ def build_lists(slot, rows):
               (slot == "intra" or (r["pos"] or 0) >= 0.67)]
         sh = [r for r in rows if (r["x"] or 0) >= 3 and (r["chg"] or 0) >= 2]
         sh.sort(key=lambda r: (-r["score"], -r["x"]))
-        L["volume_shockers"] = {"title": "Volume shockers, ranked by quality", "rows": pick(sh[:top], rated),
-                                "rule": "volume 3x+ of 10-day average and up 2%+; score 0-100 from price-volume behaviour, cautions flag likely false volume"}
+        L["volume_shockers"] = {"title": "Volume shockers", "rows": pick(sh[:top], rated),
+                                "rule": "3x+ volume and up 2%+, ranked by a 0-100 price-volume quality score; cautions flag likely false volume"}
     else:
         ws = [r for r in rows if (r["wx"] or 0) >= 2 and (r["w"] or 0) > 0]
         ws.sort(key=lambda r: (-r["score"], -r["wx"]))
-        L["weekly_volume"] = {"title": "Weekly volume shockers, ranked by quality",
-                              "rule": "weekly volume 2x+ of 10-week average with a positive week; score from the latest session's price-volume behaviour",
+        L["weekly_volume"] = {"title": "Weekly volume shockers",
+                              "rule": "2x+ weekly volume in a positive week, ranked by the 0-100 price-volume quality score",
                               "rows": [dict(p, x=r["wx"], chg=r["w"]) for p, r in zip(pick(ws[:top], rated), ws[:top])]}
     if slot in ("post", "weekly", "pre"):
         h52 = [r for r in rows if r["d52"] is not None and r["d52"] >= -5 and r["a50"] and r["a200"]]
@@ -812,7 +812,9 @@ def page_stocks(view):
                 elif c == "grade":
                     p.t(5.5 + off * 0.96, yy, v, 9.5, GRADE_COL[v], "bold", "right")
                 elif c == "note":
-                    p.t(5.5 + off * 0.96, yy, str(v)[:44], 7.6, DN if str(v).startswith("Caution") else UP, ha="right")
+                    parts = str(v).split(", ")
+                    short = parts[0] + (f"  +{len(parts) - 1} more" if len(parts) > 1 and str(v).startswith("Caution") else "")
+                    p.t(5.5 + off * 0.96, yy, short[:46], 7.6, DN if str(v).startswith("Caution") else UP, ha="right")
                 elif c == "x":
                     p.t(5.5 + off * 0.96, yy, f"{v}x" if v is not None else "-", 8.8, AMB, "bold", "right")
                 else:
