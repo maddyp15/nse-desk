@@ -2,9 +2,13 @@ name: nse-desk
 on:
   schedule:
     - cron: "10 3 * * 1-5"    # 08:40 IST pre-market
+    - cron: "35 3 * * 1-5"    # 09:05 IST pre-market backup
     - cron: "20 4 * * 1-5"    # 09:50 IST intraday
+    - cron: "45 4 * * 1-5"    # 10:15 IST intraday backup
     - cron: "40 10 * * 1-5"   # 16:10 IST post-market
+    - cron: "5 11 * * 1-5"    # 16:35 IST post-market backup
     - cron: "50 4 * * 6"      # Sat 10:20 IST weekly
+    - cron: "30 5 * * 6"      # Sat 11:00 IST weekly backup
     - cron: "0 2 * * 6"       # Sat 07:30 IST rebuild odds tables
   workflow_dispatch:
     inputs:
@@ -40,10 +44,10 @@ jobs:
           PICK: ${{ github.event.inputs.slot }}
         run: |
           case "$SCHED" in
-            "10 3 * * 1-5") S=pre;;
-            "20 4 * * 1-5") S=intra;;
-            "40 10 * * 1-5") S=post;;
-            "50 4 * * 6") S=weekly;;
+            "10 3 * * 1-5"|"35 3 * * 1-5") S=pre;;
+            "20 4 * * 1-5"|"45 4 * * 1-5") S=intra;;
+            "40 10 * * 1-5"|"5 11 * * 1-5") S=post;;
+            "50 4 * * 6"|"30 5 * * 6") S=weekly;;
             "0 2 * * 6") S=rates;;
             *) S="$PICK";;
           esac
@@ -56,8 +60,8 @@ jobs:
       - name: Publish dashboards
         if: steps.pick.outputs.slot != 'rates'
         env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN || secrets.MDESKBOTTKN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID || secrets.MDESKBOTID }}
           DASHBOARD_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/
           SLOT: ${{ steps.pick.outputs.slot }}
           FLAGS: ${{ github.event.inputs.flags }}

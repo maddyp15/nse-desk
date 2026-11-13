@@ -761,7 +761,7 @@ def telegram(view, paths, pdf, url):
     token, chat = os.environ.get("TELEGRAM_BOT_TOKEN"), os.environ.get("TELEGRAM_CHAT_ID")
     if not token or not chat:
         print("telegram: skipped (secrets not set)")
-        return
+        return False
     import requests
     base, cap = f"https://api.telegram.org/bot{token}/", caption(view, url)
     try:
@@ -777,8 +777,10 @@ def telegram(view, paths, pdf, url):
             with open(pdf, "rb") as fh:
                 requests.post(base + "sendDocument", data={"chat_id": chat}, files={"document": ("nse-desk-weekly.pdf", fh)}, timeout=90)
         print("telegram:", "sent" if r.ok else f"failed {r.status_code}")
+        return bool(r.ok)
     except Exception as exc:
         print("telegram: error", type(exc).__name__)
+        return False
 
 
 # ---------------- main ----------------
@@ -792,6 +794,10 @@ def main():
     src = Source(fake)
     rates = load(os.path.join(ROOT, "data", "base_rates.json"), {})
     state = load(os.path.join(OUT, "state.json"), {})
+    # Each slot has a backup timer; the second run of a day stops here once the first has posted.
+    if state.get("sent", {}).get(slot) == str(today) and "--force" not in sys.argv and not fake:
+        print(f"{slot} already posted today: nothing to do")
+        return
     errors = []
     itk = [v[0] for v in INDEX.values()]
     daily = src.many(itk + [VIX] + list(GLOBAL.values()) + list(SECTORS.values()), "2y", "1d")
@@ -859,8 +865,8 @@ def main():
         print("telegram: disabled by flag")
     elif dup and "--force" not in sys.argv:
         print("telegram: skipped (index values unchanged since the last run)")
-    else:
-        telegram(view, paths, os.path.join(IMG, f"{slot}.pdf"), os.environ.get("DASHBOARD_URL", ""))
+    elif telegram(view, paths, os.path.join(IMG, f"{slot}.pdf"), os.environ.get("DASHBOARD_URL", "")):
+        state.setdefault("sent", {})[slot] = view["date"]
     save(os.path.join(OUT, "state.json"), state)
     print(f"published {slot} {view['date']} {view['time_ist']}: {len(indices)} indices, {len(view['sectors'])} sectors, "
           f"{br['n'] if br else 0} stocks, " + ", ".join(f"{k}={len(v['rows'])}" for k, v in lists.items())
