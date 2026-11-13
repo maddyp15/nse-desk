@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>NSE Desk</title>
+<title>Maddy Desk</title>
 <style>
 :root{--bg:#0b1220;--card:#141f33;--txt:#e8eef7;--mut:#8a9bb3;--up:#2ecc8f;--dn:#ff6b6b;--acc:#5aa9ff;--amb:#f5b942}
 *{box-sizing:border-box}
@@ -44,14 +44,18 @@ svg{width:100%;height:auto;display:block}
 </head>
 <body>
 <header>
-  <h1>NSE Desk</h1>
+  <h1>Maddy Desk</h1>
   <nav id="tabs"></nav>
   <select id="day" aria-label="Date"></select>
 </header>
 <main id="app"><p class="meta">Loading...</p></main>
 <script>
-var TABS=[["pre","Pre-market"],["intra","Intraday"],["post","Post-market"],["stocks","Stocks to watch"],["weekly","Weekly"],["guide","Guide"]];
-var tab=location.hash.slice(1)||"post", day="", LISTS={};
+var ALL_TABS=[["pre","Pre-market"],["intra","Intraday"],["post","Post-market"],["stocks","Stocks to watch"],["weekly","Weekly"],["guide","Guide"]];
+// ?only=pre|intra|post|weekly shows just that view and the guide (used when a task opens one slot).
+var ONLY=new URLSearchParams(location.search).get("only");
+if(["pre","intra","post","weekly"].indexOf(ONLY)<0)ONLY=null;
+var TABS=ONLY?ALL_TABS.filter(function(t){return t[0]==ONLY||t[0]=="guide"}):ALL_TABS;
+var tab=ONLY||location.hash.slice(1)||"post", day="", LISTS={};
 function $(s){return document.querySelector(s)}
 function esc(s){return String(s==null?"":s).replace(/[&<>"]/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]})}
 function f(v,d){if(v==null)return "-";d=d==null?2:d;return Number(v).toLocaleString("en-IN",{minimumFractionDigits:d,maximumFractionDigits:d})}

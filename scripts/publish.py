@@ -537,9 +537,20 @@ def industry_rows(rows, indmap):
 
 
 # ---------------- rendering ----------------
-BG, CARD, TXT, MUT = "#f3f5fa", "#ffffff", "#1b2433", "#6d7b90"
-UP, DN, ACC, AMB = "#0d9b6a", "#d8483f", "#3466d6", "#b97a08"
-EDGE, TRACK, HILITE, BAND = "#e2e7f0", "#e8ecf4", "#fff3d2", "#e6edfb"
+BG, CARD, TXT, MUT = "#dbe3f0", "#ffffff", "#162033", "#5a687f"
+UP, DN, ACC, AMB = "#0b8f61", "#cf3f38", "#2f5fd0", "#b37405"
+EDGE, TRACK, HILITE, BAND = "#c4cfe1", "#d9e0ec", "#ffe7a8", "#1b3260"
+# One colour per data segment: the pill names the segment, the tint fills its card.
+SEG = {"levels": ("#2f5fd0", "#ffffff"), "scen": ("#0f8a8a", "#f4f8fb"), "odds": ("#6b4fc9", "#efeafc"),
+       "chart": ("#1b3260", "#ffffff"), "mtf": ("#1f7fb8", "#e4f0fb"), "glob": ("#b0680f", "#fcf1df"),
+       "vix": ("#4a55c7", "#e8ecfd"), "breadth": ("#0b8f61", "#e6f5ee"), "sector": ("#2f5fd0", "#ffffff"),
+       "shock": ("#c2410c", "#fff6ef"), "high52": ("#0b8f61", "#f2faf6"), "ath": ("#6b4fc9", "#f5f2fd"),
+       "mbo": ("#1f7fb8", "#eef6fc")}
+HEAD = {"pre": "PRE-MARKET", "intra": "INTRADAY", "post": "POST-MARKET REVIEW", "weekly": "WEEKLY REVIEW"}
+SUB_INDEX = {"pre": "INDEX PLAN FOR TODAY", "intra": "INDEX OUTLOOK", "post": "INDEX PLAN FOR NEXT SESSION",
+             "weekly": "INDEX NEXT-WEEK PLAN"}
+SUB_STOCKS = {"pre": "STOCKS TO WATCH TODAY", "intra": "EARLY VOLUME SHOCKERS", "post": "STOCKS TO WATCH",
+              "weekly": "STOCKS FOR NEXT WEEK"}
 
 
 class Page:
@@ -553,17 +564,24 @@ class Page:
         self.ax.set_xlim(0, 100)
         self.ax.set_ylim(H, 0)
         self.ax.axis("off")
-        self.rect(0, 0, 100, 6.8, BAND)
-        self.rect(0, 6.8, 100, 0.12, ACC)
-        self.t(4, 3.4, "NSE DESK", 20, ACC, "bold")
-        self.t(96, 2.8, TITLE[view["slot"]], 14, TXT, "bold", "right")
-        self.t(96, 5.3, f"{sub}  |  {view['date']} {view['time_ist']} IST", 9.5, MUT, ha="right")
+        self.rect(0, 0, 100, 7.2, BAND)
+        self.rect(0, 7.2, 100, 0.18, "#f2b233")
+        self.t(4, 3.7, "MADDY DESK", 21, "#ffffff", "bold")
+        self.t(96, 2.9, f"{HEAD[view['slot']]}  |  {sub}", 12.5, "#ffffff", "bold", "right")
+        self.t(96, 5.5, f"{view['date']}   {view['time_ist']} IST", 9.5, "#c5d3ee", ha="right")
         self.t(4, H - 1.5, "Source: Yahoo Finance (index quotes can lag ~15 min). Probabilities are historical "
                            "frequencies, not forecasts. Not investment advice.", 7.5, MUT)
 
     def card(self, x, y, w, h, fc=CARD, ec=EDGE):
         from matplotlib.patches import FancyBboxPatch
         self.ax.add_patch(FancyBboxPatch((x, y), w, h, boxstyle="round,pad=0,rounding_size=0.9", fc=fc, ec=ec, lw=1))
+
+    def pill(self, x, y, text, seg):
+        """Segment label: a filled rounded tag in the segment's colour."""
+        from matplotlib.patches import FancyBboxPatch
+        w = len(text) * 0.74 + 2.2
+        self.ax.add_patch(FancyBboxPatch((x, y - 1.05), w, 2.1, boxstyle="round,pad=0,rounding_size=0.7", fc=SEG[seg][0], ec="none"))
+        self.t(x + 1.1, y, text, 8.6, "#ffffff", "bold")
 
     def rect(self, x, y, w, h, fc):
         from matplotlib.patches import Rectangle
@@ -594,15 +612,16 @@ def page_index(view):
     main = idx[:2]
     lad_n = max(len(i["ladder"]) for i in main)
     H = 64 + lad_n * 1.9 + 30 + 4
-    p = Page(H, view, "Index plan")
+    p = Page(H, view, SUB_INDEX[view["slot"]])
     n = len(idx)
     w = (92 - 2 * (n - 1)) / n
     for k, iv in enumerate(idx):
         x = 4 + k * (w + 2)
         p.card(x, 8, w, 11.5)
+        p.rect(x + 0.9, 8, w - 1.8, 0.45, tagcol(iv["bias"]))
         p.t(x + 1.5, 10.3, iv["name"], 10.5, MUT, "bold")
         p.t(x + w - 1.5, 10.3, iv["bias"], 10, tagcol(iv["bias"]), "bold", "right")
-        p.t(x + 1.5, 14, f"{iv['close']:,.2f}", 17, TXT, "bold")
+        p.t(x + 1.5, 14, f"{iv['close']:,.2f}", 18.5, TXT, "bold")
         p.t(x + w - 1.5, 14, pc(iv["chg"]), 12, col(iv["chg"]), "bold", "right")
         p.t(x + 1.5, 16.8, f"RSI {iv['rsi']} | 1W {pc(iv['w'], 1)} | 1M {pc(iv['m'], 1)}", 7.2, MUT)
         p.t(x + 1.5, 18.4, f"52w {n0(iv['lo52'])}", 6.8, MUT)
@@ -612,7 +631,7 @@ def page_index(view):
         frac = (iv["close"] - iv["lo52"]) / max(iv["hi52"] - iv["lo52"], 1e-9)
         p.rect(bx + bw * min(max(frac, 0), 1) - 0.25, 17.85, 0.5, 1.15, ACC)
     vx, s = view["vix"], view["sentiment"]
-    p.card(4, 21, 92, 6)
+    p.card(4, 21, 92, 6, fc=SEG["vix"][1])
     p.t(5.5, 23, "INDIA VIX", 8.5, MUT, "bold")
     p.t(5.5, 25.3, f"{vx['close']}" if vx["close"] else "-", 13, TXT, "bold")
     p.t(15, 25.3, pc(vx["chg"], 1), 10, col(-(vx["chg"] or 0)))
@@ -623,8 +642,8 @@ def page_index(view):
     for k, iv in enumerate(main):
         x = 4 + k * 47
         hh = 4 + lad_n * 1.9
-        p.card(x, y0, 45, hh)
-        p.t(x + 1.5, y0 + 2, f"{iv['name']}  KEY LEVELS", 9.5, ACC, "bold")
+        p.card(x, y0, 45, hh, fc=SEG["levels"][1])
+        p.pill(x + 1.3, y0 + 2, f"{iv['name']} KEY LEVELS", "levels")
         if iv.get("gap"):
             p.t(x + 43.5, y0 + 2, f"Gap {pc(iv['gap']['pct'])}", 9, col(iv["gap"]["pct"]), "bold", "right")
         for j, r in enumerate(iv["ladder"]):
@@ -637,16 +656,18 @@ def page_index(view):
             p.t(x + 30, yy, f"{r['v']:,.2f}", 9, TXT if not last else AMB, "bold", "right")
             p.t(x + 43.5, yy, pc((r["v"] / iv["close"] - 1) * 100), 8.2, MUT, ha="right")
         y1 = y0 + hh + 1.5
-        p.card(x, y1, 45, 15)
-        p.t(x + 1.5, y1 + 2, "SCENARIOS", 9.5, ACC, "bold")
+        p.card(x, y1, 45, 15, fc=SEG["scen"][1])
+        p.pill(x + 1.3, y1 + 2, "SCENARIOS", "scen")
+        for j, tint in enumerate(("#dff3e9", "#fbe3e1", "#fdf0cf")):
+            p.rect(x + 1, y1 + 3.5 + j * 3.6, 43, 3.3, tint)
         for j, sc in enumerate(iv["scenarios"]):
             yy = y1 + 4.6 + j * 3.6
             p.t(x + 2, yy, sc["name"], 9, (UP, DN, AMB)[j], "bold")
             p.t(x + 16, yy, sc["trigger"], 8.6, TXT)
             p.t(x + 2, yy + 1.7, f"targets {sc['targets']}   |   invalid: {sc['invalid']}", 8, MUT)
         y2 = y1 + 16.5
-        p.card(x, y2, 45, 13.5)
-        p.t(x + 1.5, y2 + 2, "HISTORICAL ODDS", 9.5, ACC, "bold")
+        p.card(x, y2, 45, 13.5, fc=SEG["odds"][1])
+        p.pill(x + 1.3, y2 + 2, "HISTORICAL ODDS", "odds")
         if iv["probs"]:
             p.t(x + 1.5, y2 + 4.2, iv["setup"], 7.8, MUT)
             for j, pr in enumerate(iv["probs"]):
@@ -664,8 +685,8 @@ def page_index(view):
             e = iv["exp"]
             p.t(x + 43.5, y2 + 2, f"VIX 1-sigma {e['horizon']}: {n0(e['lo'])}-{n0(e['hi'])}", 8, MUT, ha="right")
     y3 = y0 + 4 + lad_n * 1.9 + 33
-    p.card(4, y3, 45, 26)
-    p.t(5.5, y3 + 2, f"{main[0]['name']}  LAST 40 SESSIONS", 9.5, ACC, "bold")
+    p.card(4, y3, 45, 26, fc=SEG["chart"][1])
+    p.pill(5.3, y3 + 2, f"{main[0]['name']} LAST 40 SESSIONS", "chart")
     cs = main[0]["candles"]
     lo, hi = min(c[3] for c in cs), max(c[2] for c in cs)
     fy = lambda v: y3 + 24.5 - (v - lo) / (hi - lo + 1e-9) * 20
@@ -679,8 +700,8 @@ def page_index(view):
         cc = UP if c >= o else DN
         p.ax.plot([cx + 0.35, cx + 0.35], [fy(h), fy(l)], color=cc, lw=0.7)
         p.rect(cx, min(fy(o), fy(c)), 0.7, max(abs(fy(o) - fy(c)), 0.12), cc)
-    p.card(51, y3, 45, 12)
-    p.t(52.5, y3 + 2, "MULTI-TIMEFRAME TREND", 9.5, ACC, "bold")
+    p.card(51, y3, 45, 12, fc=SEG["mtf"][1])
+    p.pill(52.3, y3 + 2, "MULTI-TIMEFRAME", "mtf")
     for k, iv in enumerate(main):
         p.t(72 + k * 12, y3 + 2, iv["name"], 8, MUT, "bold")
     tfs = [m["tf"] for m in main[0]["mtf"]]
@@ -691,8 +712,8 @@ def page_index(view):
             m = next((z for z in iv["mtf"] if z["tf"] == tf), None)
             if m:
                 p.t(72 + k * 12, yy, f"{m['tag']}  ({m['rsi']:.0f})", 8.5, tagcol(m["tag"]), "bold")
-    p.card(51, y3 + 13.5, 45, 12.5)
-    p.t(52.5, y3 + 15.5, "GLOBAL CUES", 9.5, ACC, "bold")
+    p.card(51, y3 + 13.5, 45, 12.5, fc=SEG["glob"][1])
+    p.pill(52.3, y3 + 15.5, "GLOBAL CUES", "glob")
     for j, g in enumerate(view["globals"][:10]):
         gx, gy = 52.5 + (j % 2) * 22, y3 + 17.8 + (j // 2) * 1.75
         p.t(gx, gy, g["name"], 8.3, MUT)
@@ -705,7 +726,7 @@ def page_market(view):
     sec, b = view["sectors"], view.get("breadth")
     rows = (len(sec) + 3) // 4
     H = 10 + rows * 9.5 + 26
-    p = Page(H, view, "Sectors and breadth")
+    p = Page(H, view, "SECTORS AND BREADTH" + (" THIS WEEK" if view["slot"] == "weekly" else ""))
     key = "w" if view["slot"] == "weekly" else "chg"
     sec = sorted(sec, key=lambda s: -(s[key] or 0))
     for j, s in enumerate(sec):
@@ -723,8 +744,9 @@ def page_market(view):
         p.t(x + 1.2, y + 7.1, f"1D {pc(s['chg'], 1)}  1W {pc(s['w'], 1)}  1M {pc(s['m'], 1)}  RSI {s['rsi']:.0f}", 6.4, TXT)
     y = 8 + rows * 9.5 + 1
     if b:
-        p.card(4, y, 45, 21)
-        p.t(5.5, y + 2, f"MARKET BREADTH  ({b['n']} liquid stocks, {view['universe']})", 9.5, ACC, "bold")
+        p.card(4, y, 45, 21, fc=SEG["breadth"][1])
+        p.pill(5.3, y + 2, "MARKET BREADTH", "breadth")
+        p.t(47.5, y + 2, f"{b['n']} liquid stocks, {view['universe']}", 7.6, MUT, ha="right")
         tot = b["adv"] + b["dec"]
         p.rect(5.5, y + 4.2, 42 * b["adv"] / tot, 1.6, UP)
         p.rect(5.5 + 42 * b["adv"] / tot, y + 4.2, 42 * b["dec"] / tot, 1.6, DN)
@@ -736,7 +758,7 @@ def page_market(view):
             p.t(47.5, y + 10.4 + j * 2.4, val, 9.5, TXT, "bold", "right")
         for k, (ttl, key2, cc) in enumerate((("TOP GAINERS", "gainers", UP), ("TOP LOSERS", "losers", DN))):
             x = 51 + k * 23.25
-            p.card(x, y, 21.75, 21)
+            p.card(x, y, 21.75, 21, fc="#e6f5ee" if k == 0 else "#fbe7e5")
             p.t(x + 1.2, y + 2, ttl, 9.5, cc, "bold")
             for j, r in enumerate(b[key2]):
                 p.t(x + 1.2, y + 5.2 + j * 3, r["s"][:11], 9, TXT, "bold")
@@ -748,9 +770,9 @@ def page_market(view):
 def page_industries(view):
     rows = view["industries"][:24]
     H = 15 + 2.3 * len(rows) + 5
-    p = Page(H, view, "Sector analysis")
+    p = Page(H, view, "SECTOR ANALYSIS BY INDUSTRY")
     p.card(4, 8, 92, 7 + 2.3 * len(rows))
-    p.t(5.5, 10, "SECTOR ANALYSIS BY INDUSTRY", 10, ACC, "bold")
+    p.pill(5.3, 10, "RANKED BY 1-WEEK CHANGE", "sector")
     p.t(94.5, 10, "Nifty 500 stocks, equal-weight averages, ranked by 1-week change", 7.6, MUT, ha="right")
     for lab, x, ha in (("Industry", 5.5, "left"), ("Stocks", 38, "right"), ("1D", 44.5, "right"), ("1W", 51, "right"),
                        ("1M", 57.5, "right"), ("RSI", 62, "right"), (">50DMA", 69, "right"), ("Best of week", 71, "left"),
@@ -781,13 +803,15 @@ def page_stocks(view):
     if not lists:
         return None
     H = 9 + sum(6 + 2.1 * min(12, len(l["rows"])) + 1.5 for l in lists) + 3
-    p = Page(H, view, "Stocks to watch")
+    p = Page(H, view, SUB_STOCKS[view["slot"]])
     y = 8
     for l in lists:
         rows = l["rows"][:12]
         hh = 6 + 2.1 * len(rows)
-        p.card(4, y, 92, hh)
-        p.t(5.5, y + 1.9, l["title"].upper(), 10, ACC, "bold")
+        seg = ("shock" if "shockers" in l["title"].lower() else "high52" if "52" in l["title"] else
+               "ath" if "All-time" in l["title"] else "mbo")
+        p.card(4, y, 92, hh, fc=SEG[seg][1])
+        p.pill(5.3, y + 1.9, l["title"].upper(), seg)
         p.t(94.5, y + 1.9, l["rule"], 7.6, MUT, ha="right")
         cols = [c for c in LCOL if c in rows[0]]
         for c in cols:
@@ -847,7 +871,7 @@ def render(view, slot):
 
 # ---------------- telegram ----------------
 def caption(view, url):
-    out = [f"<b>NSE DESK | {TITLE[view['slot']]}</b>  {view['date']} {view['time_ist']}"]
+    out = [f"<b>MADDY DESK | {HEAD[view['slot']]}</b>  {view['date']} {view['time_ist']}"]
     for iv in view["indices"][:2]:
         s = f"<b>{iv['name']}</b> {iv['close']:,.0f} ({iv['chg']:+.2f}%) {iv['bias']}"
         if iv.get("gap"):
