@@ -64,6 +64,7 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID || secrets.MDESKBOTID }}
           DASHBOARD_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/
           SLOT: ${{ steps.pick.outputs.slot }}
+          TRIGGER: ${{ github.event_name }}
           FLAGS: ${{ github.event.inputs.flags }}
         run: python scripts/publish.py "$SLOT" $FLAGS
       - name: Commit results

@@ -43,6 +43,11 @@ FALLBACK = ("RELIANCE TCS HDFCBANK ICICIBANK INFY SBIN BHARTIARTL ITC LT KOTAKBA
             "UNIONBANK JIOFIN MAXHEALTH INDIGO SUZLON IRFC RVNL").split()
 
 
+# A timer-started run is only useful inside its slot's window (IST minutes of the day).
+# GitHub's timer can start a run hours late; outside the window the run publishes nothing.
+SLOT_WINDOW = {"pre": (7 * 60 + 30, 9 * 60 + 14), "intra": (9 * 60 + 45, 11 * 60 + 30), "post": (15 * 60 + 45, 23 * 60 + 59)}
+
+
 def now_ist():
     return dt.datetime.now(IST)
 
@@ -791,6 +796,11 @@ def main():
     if str(today) in cfg.get("holidays", []) and "--force" not in sys.argv:
         print("holiday: nothing published")
         return
+    if os.environ.get("TRIGGER") == "schedule" and slot in SLOT_WINDOW:
+        lo, hi = SLOT_WINDOW[slot]
+        if not lo <= now.hour * 60 + now.minute <= hi:
+            print(f"{slot} timer started late at {now:%H:%M} IST, outside its window: nothing published")
+            return
     src = Source(fake)
     rates = load(os.path.join(ROOT, "data", "base_rates.json"), {})
     state = load(os.path.join(OUT, "state.json"), {})
