@@ -10,6 +10,9 @@ on:
     - cron: "50 4 * * 6"      # Sat 10:20 IST weekly
     - cron: "30 5 * * 6"      # Sat 11:00 IST weekly backup
     - cron: "0 2 * * 6"       # Sat 07:30 IST rebuild odds tables
+  push:
+    branches: [main]
+    paths: ["trigger/**"]    # a one-line file pushed by an outside scheduler starts a run on time
   workflow_dispatch:
     inputs:
       slot:
@@ -42,6 +45,7 @@ jobs:
         env:
           SCHED: ${{ github.event.schedule }}
           PICK: ${{ github.event.inputs.slot }}
+          EVENT: ${{ github.event_name }}
         run: |
           case "$SCHED" in
             "10 3 * * 1-5"|"35 3 * * 1-5") S=pre;;
@@ -51,7 +55,8 @@ jobs:
             "0 2 * * 6") S=rates;;
             *) S="$PICK";;
           esac
-          [ -z "$S" ] && S=post
+          if [ "$EVENT" = "push" ]; then S=$(cut -d' ' -f1 trigger/slot.txt | tr -cd 'a-z'); fi
+          case "$S" in pre|intra|post|weekly|rates) ;; *) S=post;; esac
           echo "slot=$S" >> "$GITHUB_OUTPUT"
           echo "slot: $S"
       - name: Build odds tables

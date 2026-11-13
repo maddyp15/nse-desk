@@ -365,6 +365,7 @@ def stock_rows(data, ath_cache):
         prior12 = mo["High"].iloc[-13:-1].max() if len(mo) >= 8 else np.nan
         mbo = bool(len(mo) >= 8 and mo["Close"].iloc[-1] > prior12 and mo["Close"].iloc[-2] <= prior12)
         rng = h.iloc[-1] - l.iloc[-1]
+        q = quality(d, last, prev, rng, rs, mas, val20, hi52)
         tag = ("Overbought" if rs > 75 else "Strong trend" if (ma >= 8 and rs >= 55) else
                "Recovering" if ma >= 5 else "Weak")
         rows.append({"s": sym, "c": r2(last), "chg": r2((last / prev - 1) * 100),
@@ -377,7 +378,86 @@ def stock_rows(data, ath_cache):
                      "wx": r2(wkv.iloc[-1] / wkv.iloc[-11:-1].mean(), 1) if len(wkv) > 11 and wkv.iloc[-11:-1].mean() else None,
                      "a50": bool(last > mas[7]) if mas[7] == mas[7] else None,
                      "a200": bool(last > mas[8]) if mas[8] == mas[8] else None,
-                     "mbo": mbo, "pm": r2((last / prior12 - 1) * 100, 1) if prior12 == prior12 else None})
+                     "mbo": mbo, "pm": r2((last / prior12 - 1) * 100, 1) if prior12 == prior12 else None,
+                     "r63": r2((last / c.iloc[-64] - 1) * 100, 1) if len(c) > 64 else None, **q})
+    return rank_quality(rows)
+
+
+def quality(d, last, prev, rng, rs, mas, val20, hi52):
+    """Price-volume quality of today's bar: is the volume doing real work, or is it churn / supply?
+
+    Uses effort-versus-result (range against ATR), close location, upper wick, pocket pivot,
+    20-day breakout, trend, up/down volume balance, extension and liquidity. Relative strength
+    is added afterwards in rank_quality, once every stock's 3-month return is known.
+    """
+    o, h, l, c, v = d["Open"], d["High"], d["Low"], d["Close"], d["Volume"]
+    tr = pd.concat([h - l, (h - c.shift()).abs(), (l - c.shift()).abs()], axis=1).max(axis=1)
+    atr = tr.iloc[-15:-1].mean()
+    pos = (last - l.iloc[-1]) / rng if rng > 0 else 0.5
+    wick = (h.iloc[-1] - max(o.iloc[-1], last)) / rng if rng > 0 else 0.0
+    effort = v.iloc[-1] / v.iloc[-11:-1].mean() if v.iloc[-11:-1].mean() else 0.0
+    result = rng / atr if atr else 1.0
+    up_day = last > prev
+    prior = d.iloc[-11:-1]
+    down_vol = prior["Volume"][prior["Close"] < prior["Close"].shift().fillna(prior["Open"])]
+    pocket = bool(up_day and (down_vol.empty or v.iloc[-1] > down_vol.max()))
+    breakout = bool(last > h.iloc[-21:-1].max())
+    ch = c.diff().iloc[-50:]
+    vv = v.iloc[-50:]
+    dn = vv[ch < 0].sum()
+    udvr = vv[ch > 0].sum() / dn if dn else 2.0
+    ext = (last - mas[6]) / atr if atr and mas[6] == mas[6] else 0.0
+    spikes = int((v.iloc[-10:] > 2 * v.iloc[-60:-10].mean()).sum()) if len(v) > 60 else 0
+    gap_fade = bool(o.iloc[-1] > prev * 1.03 and last < o.iloc[-1])
+    a50, a200 = last > mas[7], (last > mas[8]) if mas[8] == mas[8] else None
+    score, good, bad = 50, [], []
+
+    def add(pts, cond, text, bucket):
+        nonlocal score
+        if cond:
+            score += pts
+            bucket.append(text)
+
+    add(12, pos >= 0.75, "strong close", good)
+    add(-15, pos < 0.5, "weak close", bad)
+    add(-12, wick > 0.4, "long upper wick (supply)", bad)
+    add(10, result >= 1.2, "wide range", good)
+    add(-12, effort >= 3 and result < 0.8, "churn: big volume, small range", bad)
+    add(10, breakout, "20-day breakout", good)
+    add(6, hi52 and last >= 0.98 * hi52, "at 52-week high", good)
+    add(8, pocket, "pocket pivot", good)
+    add(8, bool(a50 and a200), "uptrend", good)
+    add(-10, a200 is False, "below 200-DMA", bad)
+    add(6, udvr >= 1.3, "accumulation", good)
+    add(-6, udvr < 0.8, "distribution in last 50 days", bad)
+    add(-10, ext > 3, "overextended", bad)
+    add(-6, rs > 80, "RSI above 80", bad)
+    add(-8, gap_fade, "gap faded", bad)
+    add(-6, val20 < 25, "thin liquidity", bad)
+    add(-6, spikes >= 3 and ext > 2, "repeat spikes: possible climax", bad)
+    return {"score": score, "good": good, "bad": bad}
+
+
+def rank_quality(rows):
+    """Add relative strength (3-month return percentile in the universe), then grade each stock."""
+    vals = sorted(r["r63"] for r in rows if r["r63"] is not None)
+    for r in rows:
+        if r["r63"] is not None and vals:
+            pct = 100 * sum(1 for x in vals if x <= r["r63"]) / len(vals)
+            r["rs"] = round(pct)
+            if pct >= 80:
+                r["score"] += 8
+                r["good"].append("relative strength leader")
+            elif pct < 30:
+                r["score"] -= 6
+                r["bad"].append("weak relative strength")
+        else:
+            r["rs"] = None
+        # A caution caps the grade: one caution cannot be an A, two or more cannot be a B.
+        cap = 100 if not r["bad"] else 74 if len(r["bad"]) == 1 else 59
+        r["score"] = int(max(0, min(cap, r["score"])))
+        r["grade"] = "A" if r["score"] >= 75 else "B" if r["score"] >= 60 else "C" if r["score"] >= 45 else "D"
+        r["note"] = ("Caution: " + ", ".join(r["bad"][:2])) if r["bad"] else ", ".join(r["good"][:2])
     return rows
 
 
@@ -388,17 +468,20 @@ def pick(rows, cols):
 def build_lists(slot, rows):
     L, top = {}, 15
     base = ["s", "c", "chg", "x", "cr", "d52", "rsi", "ma", "tag"]
+    rated = ["s", "c", "chg", "x", "cr", "rs", "score", "grade", "note"]
     if slot != "weekly":
         sh = [r for r in rows if (r["x"] or 0) >= 3 and (r["chg"] or 0) >= 2 and
               (slot == "intra" or (r["pos"] or 0) >= 0.67)]
-        sh.sort(key=lambda r: -r["x"])
-        L["volume_shockers"] = {"title": "Volume shockers", "rows": pick(sh[:top], base),
-                                "rule": "volume 3x+ of 10-day average, up 2%+, closing in the top third of the day's range"}
+        sh = [r for r in rows if (r["x"] or 0) >= 3 and (r["chg"] or 0) >= 2]
+        sh.sort(key=lambda r: (-r["score"], -r["x"]))
+        L["volume_shockers"] = {"title": "Volume shockers, ranked by quality", "rows": pick(sh[:top], rated),
+                                "rule": "volume 3x+ of 10-day average and up 2%+; score 0-100 from price-volume behaviour, cautions flag likely false volume"}
     else:
         ws = [r for r in rows if (r["wx"] or 0) >= 2 and (r["w"] or 0) > 0]
-        ws.sort(key=lambda r: -r["wx"])
-        L["weekly_volume"] = {"title": "Weekly volume shockers", "rule": "weekly volume 2x+ of 10-week average with a positive week",
-                              "rows": [dict(p, x=r["wx"], chg=r["w"]) for p, r in zip(pick(ws[:top], base), ws[:top])]}
+        ws.sort(key=lambda r: (-r["score"], -r["wx"]))
+        L["weekly_volume"] = {"title": "Weekly volume shockers, ranked by quality",
+                              "rule": "weekly volume 2x+ of 10-week average with a positive week; score from the latest session's price-volume behaviour",
+                              "rows": [dict(p, x=r["wx"], chg=r["w"]) for p, r in zip(pick(ws[:top], rated), ws[:top])]}
     if slot in ("post", "weekly", "pre"):
         h52 = [r for r in rows if r["d52"] is not None and r["d52"] >= -5 and r["a50"] and r["a200"]]
         h52.sort(key=lambda r: (-r["d52"], -(r["cr"] or 0)))
@@ -454,8 +537,9 @@ def industry_rows(rows, indmap):
 
 
 # ---------------- rendering ----------------
-BG, CARD, TXT, MUT = "#0b1220", "#141f33", "#e8eef7", "#8a9bb3"
-UP, DN, ACC, AMB = "#2ecc8f", "#ff6b6b", "#5aa9ff", "#f5b942"
+BG, CARD, TXT, MUT = "#f3f5fa", "#ffffff", "#1b2433", "#6d7b90"
+UP, DN, ACC, AMB = "#0d9b6a", "#d8483f", "#3466d6", "#b97a08"
+EDGE, TRACK, HILITE, BAND = "#e2e7f0", "#e8ecf4", "#fff3d2", "#e6edfb"
 
 
 class Page:
@@ -469,13 +553,15 @@ class Page:
         self.ax.set_xlim(0, 100)
         self.ax.set_ylim(H, 0)
         self.ax.axis("off")
+        self.rect(0, 0, 100, 6.8, BAND)
+        self.rect(0, 6.8, 100, 0.12, ACC)
         self.t(4, 3.4, "NSE DESK", 20, ACC, "bold")
         self.t(96, 2.8, TITLE[view["slot"]], 14, TXT, "bold", "right")
         self.t(96, 5.3, f"{sub}  |  {view['date']} {view['time_ist']} IST", 9.5, MUT, ha="right")
         self.t(4, H - 1.5, "Source: Yahoo Finance (index quotes can lag ~15 min). Probabilities are historical "
                            "frequencies, not forecasts. Not investment advice.", 7.5, MUT)
 
-    def card(self, x, y, w, h, fc=CARD, ec="none"):
+    def card(self, x, y, w, h, fc=CARD, ec=EDGE):
         from matplotlib.patches import FancyBboxPatch
         self.ax.add_patch(FancyBboxPatch((x, y), w, h, boxstyle="round,pad=0,rounding_size=0.9", fc=fc, ec=ec, lw=1))
 
@@ -519,7 +605,12 @@ def page_index(view):
         p.t(x + 1.5, 14, f"{iv['close']:,.2f}", 17, TXT, "bold")
         p.t(x + w - 1.5, 14, pc(iv["chg"]), 12, col(iv["chg"]), "bold", "right")
         p.t(x + 1.5, 16.8, f"RSI {iv['rsi']} | 1W {pc(iv['w'], 1)} | 1M {pc(iv['m'], 1)}", 7.2, MUT)
-        p.t(x + 1.5, 18.4, f"52-week range {n0(iv['lo52'])} - {n0(iv['hi52'])}", 7.2, MUT)
+        p.t(x + 1.5, 18.4, f"52w {n0(iv['lo52'])}", 6.8, MUT)
+        p.t(x + w - 1.5, 18.4, n0(iv["hi52"]), 6.8, MUT, ha="right")
+        bx, bw = x + 10.5, w - 20
+        p.rect(bx, 18.2, bw, 0.45, TRACK)
+        frac = (iv["close"] - iv["lo52"]) / max(iv["hi52"] - iv["lo52"], 1e-9)
+        p.rect(bx + bw * min(max(frac, 0), 1) - 0.25, 17.85, 0.5, 1.15, ACC)
     vx, s = view["vix"], view["sentiment"]
     p.card(4, 21, 92, 6)
     p.t(5.5, 23, "INDIA VIX", 8.5, MUT, "bold")
@@ -541,7 +632,7 @@ def page_index(view):
             last = r["k"] == "LAST"
             c = AMB if last else (DN if r["v"] > iv["close"] else UP)
             if last:
-                p.rect(x + 1, yy - 0.9, 43, 1.8, "#3a2f10")
+                p.rect(x + 1, yy - 0.9, 43, 1.8, HILITE)
             p.t(x + 2, yy, r["k"], 8.8, c, "bold" if last or r["k"][0] in "RSP" and len(r["k"]) <= 2 else "normal")
             p.t(x + 30, yy, f"{r['v']:,.2f}", 9, TXT if not last else AMB, "bold", "right")
             p.t(x + 43.5, yy, pc((r["v"] / iv["close"] - 1) * 100), 8.2, MUT, ha="right")
@@ -561,7 +652,7 @@ def page_index(view):
             for j, pr in enumerate(iv["probs"]):
                 yy = y2 + 6.6 + j * 2.2
                 p.t(x + 2, yy, pr["label"], 8.8)
-                p.rect(x + 21, yy - 0.6, 10, 1.2, BG)
+                p.rect(x + 21, yy - 0.6, 10, 1.2, TRACK)
                 p.rect(x + 21, yy - 0.6, 10 * pr["p"] / 100, 1.2, UP if pr["p"] >= 50 else DN)
                 p.t(x + 43.5, yy, f"{pr['p']:.0f}%   n={pr['n']}", 8.8, TXT, "bold", "right")
             if iv.get("range"):
@@ -622,7 +713,8 @@ def page_market(view):
         v = s[key] or 0
         a = min(abs(v) / 3, 1)
         base = (0x2e, 0xcc, 0x8f) if v >= 0 else (0xff, 0x6b, 0x6b)
-        bg = "#%02x%02x%02x" % tuple(int(0x14 + (c - 0x14) * (0.12 + 0.45 * a)) for c in base)
+        base = (0x0d, 0x9b, 0x6a) if v >= 0 else (0xd8, 0x48, 0x3f)
+        bg = "#%02x%02x%02x" % tuple(int(255 + (c - 255) * (0.10 + 0.38 * a)) for c in base)
         p.card(x, y, 22.25, 8.5, fc=bg)
         p.t(x + 1.2, y + 1.9, s["name"], 9.5, TXT, "bold")
         p.t(x + 21, y + 1.9, s["bias"], 8, tagcol(s["bias"]), "bold", "right")
@@ -679,7 +771,9 @@ def page_industries(view):
 
 
 LCOL = {"s": ("Stock", 0), "c": ("Close", 22), "chg": ("Chg%", 31), "m": ("1M%", 31), "x": ("Vol x", 39), "pm": ("vs 12M high", 42),
-        "cr": ("Rs cr", 48), "d52": ("vs 52wH", 58), "dath": ("vs ATH", 58), "rsi": ("RSI", 65), "ma": ("MAs", 72), "tag": ("Read", 92)}
+        "cr": ("Rs cr", 48), "d52": ("vs 52wH", 58), "dath": ("vs ATH", 58), "rsi": ("RSI", 65), "ma": ("MAs", 72), "tag": ("Read", 92),
+        "rs": ("RS", 53), "score": ("Score", 63), "grade": ("", 66), "note": ("What the volume says", 92)}
+GRADE_COL = {"A": UP, "B": ACC, "C": AMB, "D": DN}
 
 
 def page_stocks(view):
@@ -711,6 +805,14 @@ def page_stocks(view):
                     p.t(5.5 + off * 0.96, yy, f"{v}/9", 8.8, UP if v >= 7 else AMB if v >= 5 else DN, ha="right")
                 elif c in ("chg", "m", "pm", "d52", "dath"):
                     p.t(5.5 + off * 0.96, yy, pc(v, 1), 8.8, col(v) if c in ("chg", "m", "pm") else MUT, ha="right")
+                elif c == "score":
+                    p.rect(5.5 + (off - 8) * 0.96, yy - 0.45, 5, 0.9, TRACK)
+                    p.rect(5.5 + (off - 8) * 0.96, yy - 0.45, 5 * v / 100, 0.9, GRADE_COL[r["grade"]])
+                    p.t(5.5 + off * 0.96, yy, v, 8.8, TXT, "bold", "right")
+                elif c == "grade":
+                    p.t(5.5 + off * 0.96, yy, v, 9.5, GRADE_COL[v], "bold", "right")
+                elif c == "note":
+                    p.t(5.5 + off * 0.96, yy, str(v)[:44], 7.6, DN if str(v).startswith("Caution") else UP, ha="right")
                 elif c == "x":
                     p.t(5.5 + off * 0.96, yy, f"{v}x" if v is not None else "-", 8.8, AMB, "bold", "right")
                 else:
@@ -796,7 +898,7 @@ def main():
     if str(today) in cfg.get("holidays", []) and "--force" not in sys.argv:
         print("holiday: nothing published")
         return
-    if os.environ.get("TRIGGER") == "schedule" and slot in SLOT_WINDOW:
+    if os.environ.get("TRIGGER") in ("schedule", "push") and slot in SLOT_WINDOW:
         lo, hi = SLOT_WINDOW[slot]
         if not lo <= now.hour * 60 + now.minute <= hi:
             print(f"{slot} timer started late at {now:%H:%M} IST, outside its window: nothing published")

@@ -98,9 +98,11 @@ function mtfCard(v){
   (a[0].mtf||[]).forEach(function(m){h+="<tr><td>"+esc(m.tf)+"</td>";a.forEach(function(i){var z=(i.mtf||[]).filter(function(q){return q.tf==m.tf})[0];h+=z?'<td class="'+tc(z.tag)+'">'+esc(z.tag)+' <span class="mut">RSI '+z.rsi+"</span></td>":"<td>-</td>"});h+="</tr>"});
   return h+"</tbody></table></div>";
 }
-var COLS={s:"Stock",c:"Close",chg:"Chg %",m:"1M %",x:"Vol x",pm:"vs 12M high %",cr:"Rs cr",d52:"vs 52wH %",dath:"vs ATH %",rsi:"RSI",ma:"MAs /9",tag:"Read"};
+var COLS={s:"Stock",c:"Close",chg:"Chg %",m:"1M %",x:"Vol x",pm:"vs 12M high %",cr:"Rs cr",d52:"vs 52wH %",dath:"vs ATH %",rsi:"RSI",ma:"MAs /9",tag:"Read",rs:"RS pct",score:"Score",grade:"Grade",note:"What the volume says"};
 function rowsHtml(rows,cols){return rows.map(function(r){return "<tr>"+cols.map(function(c){var v=r[c];
   if(c=="s")return '<td><a target="_blank" rel="noopener" href="https://www.tradingview.com/chart/?symbol=NSE:'+encodeURIComponent(v)+'">'+esc(v)+"</a></td>";
+  if(c=="grade")return '<td class="'+({A:"up",B:"acc",C:"amb",D:"dn"}[v]||"")+'"><b>'+esc(v)+"</b></td>";
+  if(c=="note")return '<td class="sm '+(String(v).indexOf("Caution")==0?"dn":"up")+'" style="white-space:normal;text-align:left">'+esc(v)+"</td>";
   if(c=="tag")return '<td class="'+tc(v)+'">'+esc(v)+"</td>";
   if(c=="chg"||c=="m"||c=="pm")return '<td class="'+cl(v)+'">'+pc(v,1)+"</td>";
   if(c=="x")return '<td class="amb">'+(v==null?"-":v+"x")+"</td>";
