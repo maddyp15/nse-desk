@@ -25,3 +25,17 @@ Option chain, OI, PCR, IV, Greeks, FII/DII flows and GIFT Nifty. Broker data mus
 Actions > nse-desk > Run workflow. Slot: pre, intra, post, weekly or rates. Add `--force` to run outside the slot window or to post again on the same day.
 
 `scripts/desk.py` is an unused earlier draft.
+
+## 2026-11-14 changes
+- Slot content (`SLOT_CONTENT` in scripts/publish.py): pre = index plan only (one image, sent with sendPhoto);
+  intra = plan + early volume shockers; post and weekly = plan + sectors, breadth, industries, stock lists.
+- Page one of every slot is the overview: verdict strip (Python port of the Trading OS verdict and risk
+  regime), index strip, plan cards, timeframes and global cues. Text widths are measured with the installed font.
+- Duplicate check includes the date, so Saturday's weekly posts even though it uses Friday's bar.
+- `trigger/slot.txt` containing `<slot> refresh` rebuilds that slot's pages with --force --no-telegram.
+- docs/index.html is rebuilt in the same light layout, one tab per slot.
+- Trading OS (D:\CLAUDE\LocalCL\WEBAPP, private, never published here): PREMARKET_MACROS merged into the
+  pre-market desk task (id `premarket_macros` kept, 08:55, desk_view pre); market_desk_pre removed; tick-lists
+  removed; monthly CPR moved to the intraday desk; new endpoints /api/market/index-contribution,
+  /api/market/fno-buildup, /api/market/monthly-cpr (backend/app/market_internals.py); options desk covers SENSEX.
+  Backups: backend/backups/market-desk-2026-11-14/.
