@@ -1143,7 +1143,9 @@ def main():
     for iv in indices:
         iv["verdict"] = verdict(iv, view["sentiment"])
     view["regime"] = risk_regime(view["vix"], glob)
-    digest = hashlib.sha1(json.dumps([[i["close"], i["high"], i["low"]] for i in indices]).encode()).hexdigest()
+    # Same day and same index values means a rerun of a run already posted; a new day always posts, even when
+    # the values match (Saturday's weekly is built on Friday's closing bar).
+    digest = hashlib.sha1(json.dumps([view["date"]] + [[i["close"], i["high"], i["low"]] for i in indices]).encode()).hexdigest()
     dup = state.get("hash", {}).get(slot) == digest
     save(os.path.join(OUT, f"{slot}.json"), view)
     save(os.path.join(OUT, "history", f"{view['date']}_{slot}.json"), view)
