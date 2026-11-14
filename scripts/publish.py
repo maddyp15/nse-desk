@@ -45,6 +45,11 @@ FALLBACK = ("RELIANCE TCS HDFCBANK ICICIBANK INFY SBIN BHARTIARTL ITC LT KOTAKBA
 
 # A timer-started run is only useful inside its slot's window (IST minutes of the day).
 # GitHub's timer can start a run hours late; outside the window the run publishes nothing.
+# What each slot carries besides the index overview, so no page repeats another slot's data: pre-market is
+# the plan only (yesterday's lists and sectors belong to the post-market review), intraday adds the early
+# volume shockers, and the post-market and weekly reviews carry sectors, breadth, industries and lists.
+SLOT_CONTENT = {"pre": set(), "intra": {"stocks"}, "post": {"sectors", "breadth", "industries", "stocks"},
+                "weekly": {"sectors", "breadth", "industries", "stocks"}}
 SLOT_WINDOW = {"pre": (7 * 60 + 30, 9 * 60 + 14), "intra": (9 * 60 + 45, 11 * 60 + 30), "post": (15 * 60 + 45, 23 * 60 + 59)}
 
 
@@ -224,6 +229,70 @@ def sentiment(mkt, vixc):
     if dn and not vup:
         return "Possible reversal", "Market falling but VIX not rising: selling lacks fear, watch for a base"
     return "No clear signal", "Sideways market or mixed VIX: do not lean on VIX today"
+
+
+# ---------------- verdict and risk regime ----------------
+# The same rules as the Trading OS panel (frontend/src/lib/marketDesk.js), without the broker-only option
+# votes: every signal votes +1, 0 or -1 and the sum sets the label, so each verdict carries its reasons.
+VERDICT_STEPS = ["Bearish", "Bearish bias", "Neutral", "Bullish bias", "Bullish"]
+
+
+def verdict(iv, sent):
+    sig = []
+    if iv.get("bias"):
+        sig.append((1 if iv["bias"] == "Bullish" else -1 if iv["bias"] == "Bearish" else 0, f"Trend {iv['bias'].lower()}"))
+    tags = [m["tag"] for m in iv.get("mtf") or []]
+    if tags:
+        up, dn = tags.count("Bullish"), tags.count("Bearish")
+        sig.append(((up > dn) - (up < dn), f"Timeframes {up} up, {dn} down"))
+    if iv.get("probs"):
+        pr = iv["probs"][0]
+        sig.append((1 if pr["p"] >= 55 else -1 if pr["p"] <= 45 else 0, f"History {pr['p']:.0f}% {pr['label'].lower()}"))
+    if sent and sent[0] != "No read":
+        sig.append((1 if sent[0] == "Bullish" else -1 if sent[0].startswith("Bearish") else 0, f"VIX read {sent[0].lower()}"))
+    if not sig:
+        return None
+    score = sum(v for v, _ in sig)
+    step = 2 if score >= 3 else 1 if score >= 1 else -2 if score <= -3 else -1 if score <= -1 else 0
+    agree = sum(1 for v, _ in sig if (v == 0 if step == 0 else v * step > 0))
+    return {"label": VERDICT_STEPS[step + 2], "step": step, "score": score, "agreeing": agree, "total": len(sig),
+            "signals": [{"vote": v, "text": t} for v, t in sig]}
+
+
+def risk_regime(vix, glob):
+    pts, why = 0, []
+
+    def add(n, text, tone):
+        nonlocal pts
+        pts += n
+        why.append({"text": text, "tone": tone})
+
+    close, chg = vix.get("close"), vix.get("chg")
+    if close is not None:
+        if close >= 18:
+            add(2, f"VIX {close} high", "down")
+        elif close >= 15:
+            add(1, f"VIX {close} elevated", "warn")
+        else:
+            add(-1, f"VIX {close} calm", "up")
+    if chg is not None and abs(chg) >= 5:
+        add(1 if chg > 0 else -1, f"VIX {'jumped' if chg > 0 else 'eased'} {chg:+.1f}%", "down" if chg > 0 else "up")
+    g = {x["name"]: x["chg"] for x in glob}
+    us = [g[k] for k in ("S&P 500", "Nasdaq") if g.get(k) is not None]
+    if us:
+        avg = sum(us) / len(us)
+        if avg <= -1:
+            add(1, f"US stocks {avg:+.1f}%", "down")
+        elif avg >= 0.7:
+            add(-1, f"US stocks {avg:+.1f}%", "up")
+    if (g.get("USD/INR") or 0) >= 0.3:
+        add(1, f"Rupee weaker {g['USD/INR']:+.1f}%", "down")
+    if (g.get("Brent") or 0) >= 2:
+        add(1, f"Brent {g['Brent']:+.1f}%", "warn")
+    if not why:
+        return None
+    label = "Risk-off" if pts >= 2 else "Risk-on" if pts <= -1 else "Neutral"
+    return {"label": label, "points": pts, "reasons": why}
 
 
 # ---------------- index view ----------------
@@ -482,7 +551,7 @@ def build_lists(slot, rows):
         L["weekly_volume"] = {"title": "Weekly volume shockers",
                               "rule": "2x+ weekly volume in a positive week, ranked by the 0-100 price-volume quality score",
                               "rows": [dict(p, x=r["wx"], chg=r["w"]) for p, r in zip(pick(ws[:top], rated), ws[:top])]}
-    if slot in ("post", "weekly", "pre"):
+    if slot in ("post", "weekly"):
         h52 = [r for r in rows if r["d52"] is not None and r["d52"] >= -5 and r["a50"] and r["a200"]]
         h52.sort(key=lambda r: (-r["d52"], -(r["cr"] or 0)))
         L["high52_zone"] = {"title": "52-week-high zone", "rows": pick(h52[:top], base),
@@ -596,7 +665,7 @@ def col(v):
 
 
 def pc(v, d=2):
-    return "-" if v is None else f"{v:+.{d}f}%"
+    return "-" if v is None else f"{round(v, d) + 0.0:+.{d}f}%"
 
 
 def n0(v):
@@ -607,118 +676,183 @@ def tagcol(s):
     return UP if s in ("Bullish", "Leading") else DN if s in ("Bearish", "Lagging", "Bearish divergence") else AMB
 
 
-def page_index(view):
-    idx = view["indices"]
+# Tones for the overview, as on the Trading OS page: text colour and a light wash for the tile behind it.
+TONE = {"up": (UP, "#e2f3ea"), "down": (DN, "#fbe5e3"), "flat": ("#4d5b72", "#edf1f7"), "warn": (AMB, "#fcf0d8"),
+        "accent": (ACC, "#e5ecfb")}
+
+
+def tone_of(label):
+    s = str(label or "")
+    if s in ("Risk-on",) or "ull" in s or s in ("Leading", "Strong trend"):
+        return "up"
+    if s in ("Risk-off", "Lagging", "Weak") or "ear" in s:
+        return "down"
+    return "flat"
+
+
+def chips(p, x, y, w, items, size=6.9):
+    """Rounded tags that wrap inside width w; items are (text, tone). Returns the y after the last row."""
+    from matplotlib.patches import FancyBboxPatch
+    cx, cy = x, y
+    for text, tn in items:
+        cw = len(text) * size * 0.071 + 1.4
+        if cx + cw > x + w and cx > x:
+            cx, cy = x, cy + 1.9
+        fg, bg = TONE[tn]
+        p.ax.add_patch(FancyBboxPatch((cx, cy - 0.75), cw, 1.5, boxstyle="round,pad=0,rounding_size=0.6", fc=bg, ec=fg, lw=0.5))
+        p.t(cx + 0.7, cy, text, size, fg, "bold")
+        cx += cw + 0.6
+    return cy + 1.9
+
+
+def meter(p, x, y, step, tn):
+    for k, sv in enumerate((-2, -1, 0, 1, 2)):
+        lit = step is not None and (sv == step or (step != 0 and sv * step > 0 and abs(sv) <= abs(step)))
+        p.rect(x + k * 2.3, y - 0.35, 2, 0.7, TONE[tn][0] if lit else TRACK)
+
+
+def verdict_card(p, x, y, w, h, title, right, v, sub):
+    tn = ("up" if v["step"] > 0 else "down" if v["step"] < 0 else "flat") if "step" in v else tone_of(v["label"])
+    p.card(x, y, w, h, fc=TONE[tn][1], ec=TONE[tn][0])
+    p.rect(x + 0.9, y, w - 1.8, 0.4, TONE[tn][0])
+    p.t(x + 1.4, y + 1.9, title, 8, MUT, "bold")
+    if right:
+        p.t(x + w - 1.4, y + 1.9, right[0], 8, right[1], "bold", "right")
+    p.t(x + 1.4, y + 4.9, v["label"], 16.5, TONE[tn][0], "bold")
+    if "step" in v:
+        meter(p, x + w - 12.6, y + 4.9, v["step"], tn)
+    p.t(x + 1.4, y + 7.4, sub, 7.4, MUT)
+    return chips(p, x + 1.4, y + 9.6, w - 2.8, v["items"])
+
+
+def plan_card(p, x, y, w, h, iv, slot):
+    lv = iv["levels"]
+    tn = tone_of(iv["bias"])
+    p.card(x, y, w, h, fc="#ffffff")
+    p.rect(x, y + 0.9, 0.45, h - 1.8, TONE[tn][0])
+    p.pill(x + 1.3, y + 2, f"{iv['name']} {'NEXT-WEEK ' if slot == 'weekly' else ''}PLAN", "levels")
+    note = []
+    if iv.get("gap"):
+        note.append(f"Gap {pc(iv['gap']['pct'])}")
+    if iv.get("exp"):
+        note.append(f"VIX 1\u03c3 {n0(iv['exp']['lo'])}-{n0(iv['exp']['hi'])}")
+    p.t(x + w - 1.4, y + 2, "   ".join(note), 7.8, MUT, "bold", "right")
+    tw = (w - 2.8 - 4 * 0.8) / 5
+    for k, (key, ktn) in enumerate((("R2", "down"), ("R1", "down"), ("P", "flat"), ("S1", "up"), ("S2", "up"))):
+        tx = x + 1.4 + k * (tw + 0.8)
+        p.card(tx, y + 3.7, tw, 5.1, fc=TONE[ktn][1], ec=EDGE)
+        p.t(tx + 0.8, y + 4.9, key, 7.2, TONE[ktn][0], "bold")
+        p.t(tx + 0.8, y + 6.6, f"{lv[key]:,.0f}", 10.5, TXT, "bold")
+        p.t(tx + 0.8, y + 8.0, pc((lv[key] / iv["close"] - 1) * 100, 1), 6.6, MUT)
+    prev = "Week" if slot == "weekly" else "Prev"
+    line = f"{prev} H {n0(lv['PH'])} | L {n0(lv['PL'])} | C {n0(lv['PC'])}"
+    if iv.get("or"):
+        line += f"   Opening range {n0(iv['or']['lo'])}-{n0(iv['or']['hi'])}"
+    elif slot == "weekly" and iv.get("week"):
+        line += f"   Week {pc(iv['week']['chg'])}"
+    line += f"   20/50/200-DMA {n0(iv['sma20'])} / {n0(iv['sma50'])} / {n0(iv['sma200'])}"
+    p.t(x + 1.4, y + 10.1, line, 7, MUT)
+    for j, sc in enumerate(iv["scenarios"]):
+        sy = y + 11.4 + j * 2.75
+        stn = ("up", "down", "warn")[j]
+        p.card(x + 1.4, sy, w - 2.8, 2.45, fc=TONE[stn][1], ec=TONE[stn][1])
+        p.t(x + 2.2, sy + 1.22, sc["name"], 8, TONE[stn][0], "bold")
+        p.t(x + 15.2, sy + 1.22, sc["trigger"], 7.8, TXT)
+        p.t(x + w - 2.2, sy + 1.22, "\u2192 " + sc["targets"], 7.6, MUT, ha="right")
+    oy = y + 20.2
+    if iv.get("probs"):
+        p.t(x + 1.4, oy, "HISTORICAL ODDS  " + iv["setup"], 6.9, SEG["odds"][0], "bold")
+        for j, pr in enumerate(iv["probs"]):
+            yy = oy + 2.1 + j * 2.0
+            p.t(x + 1.4, yy, pr["label"], 8, TXT)
+            bx = x + w - 19
+            p.rect(bx, yy - 0.45, 9, 0.9, TRACK)
+            p.rect(bx, yy - 0.45, 9 * pr["p"] / 100, 0.9, UP if pr["p"] >= 50 else DN)
+            p.t(x + w - 1.4, yy, f"{pr['p']:.0f}%  n={pr['n']}", 8, TXT, "bold", "right")
+        if iv.get("range"):
+            g = iv["range"]
+            p.t(x + 1.4, oy + 2.1 + len(iv["probs"]) * 2.0, f"{g['text']}: {g['med']} ({g['lo']} to {g['hi']})", 6.8, MUT)
+    else:
+        p.t(x + 1.4, oy + 1.5, "Historical odds table not built yet", 7.8, MUT)
+
+
+def page_overview(view):
+    """Page one for every slot, laid out like the Trading OS desk: verdict strip, index strip, one plan card per
+    index, then timeframes and global cues. Each block appears once."""
+    idx, slot = view["indices"], view["slot"]
     main = idx[:2]
-    lad_n = max(len(i["ladder"]) for i in main)
-    H = 64 + lad_n * 1.9 + 30 + 4
-    p = Page(H, view, SUB_INDEX[view["slot"]])
-    n = len(idx)
-    w = (92 - 2 * (n - 1)) / n
-    for k, iv in enumerate(idx):
-        x = 4 + k * (w + 2)
-        p.card(x, 8, w, 11.5)
-        p.rect(x + 0.9, 8, w - 1.8, 0.45, tagcol(iv["bias"]))
-        p.t(x + 1.5, 10.3, iv["name"], 10.5, MUT, "bold")
-        p.t(x + w - 1.5, 10.3, iv["bias"], 10, tagcol(iv["bias"]), "bold", "right")
-        p.t(x + 1.5, 14, f"{iv['close']:,.2f}", 18.5, TXT, "bold")
-        p.t(x + w - 1.5, 14, pc(iv["chg"]), 12, col(iv["chg"]), "bold", "right")
-        p.t(x + 1.5, 16.8, f"RSI {iv['rsi']} | 1W {pc(iv['w'], 1)} | 1M {pc(iv['m'], 1)}", 7.2, MUT)
-        p.t(x + 1.5, 18.4, f"52w {n0(iv['lo52'])}", 6.8, MUT)
-        p.t(x + w - 1.5, 18.4, n0(iv["hi52"]), 6.8, MUT, ha="right")
-        bx, bw = x + 10.5, w - 20
-        p.rect(bx, 18.2, bw, 0.45, TRACK)
-        frac = (iv["close"] - iv["lo52"]) / max(iv["hi52"] - iv["lo52"], 1e-9)
-        p.rect(bx + bw * min(max(frac, 0), 1) - 0.25, 17.85, 0.5, 1.15, ACC)
-    vx, s = view["vix"], view["sentiment"]
-    p.card(4, 21, 92, 6, fc=SEG["vix"][1])
-    p.t(5.5, 23, "INDIA VIX", 8.5, MUT, "bold")
-    p.t(5.5, 25.3, f"{vx['close']}" if vx["close"] else "-", 13, TXT, "bold")
-    p.t(15, 25.3, pc(vx["chg"], 1), 10, col(-(vx["chg"] or 0)))
-    p.t(24, 23, "MARKET + VIX READ", 8.5, MUT, "bold")
-    p.t(24, 25.3, s[0], 12, tagcol(s[0]) if s[0] != "Possible reversal" else AMB, "bold")
-    p.t(44, 25.3, s[1], 8.8, TXT)
-    y0 = 29
+    # The plan card is as tall as its longest odds list, so no card carries empty space.
+    nprob = max(len(i.get("probs") or []) for i in main)
+    plan_h = 22.6 + max(nprob, 1) * 2.0 + 1.8
+    y_low = 33.8 + plan_h + 1.6
+    H = y_low + 16.6 + 4
+    p = Page(H, view, SUB_INDEX[slot])
+    sent = view["sentiment"]
+    # verdict strip
+    cw = (92 - 2 * 1.5) / 3
     for k, iv in enumerate(main):
-        x = 4 + k * 47
-        hh = 4 + lad_n * 1.9
-        p.card(x, y0, 45, hh, fc=SEG["levels"][1])
-        p.pill(x + 1.3, y0 + 2, f"{iv['name']} KEY LEVELS", "levels")
-        if iv.get("gap"):
-            p.t(x + 43.5, y0 + 2, f"Gap {pc(iv['gap']['pct'])}", 9, col(iv["gap"]["pct"]), "bold", "right")
-        for j, r in enumerate(iv["ladder"]):
-            yy = y0 + 4.6 + j * 1.9
-            last = r["k"] == "LAST"
-            c = AMB if last else (DN if r["v"] > iv["close"] else UP)
-            if last:
-                p.rect(x + 1, yy - 0.9, 43, 1.8, HILITE)
-            p.t(x + 2, yy, r["k"], 8.8, c, "bold" if last or r["k"][0] in "RSP" and len(r["k"]) <= 2 else "normal")
-            p.t(x + 30, yy, f"{r['v']:,.2f}", 9, TXT if not last else AMB, "bold", "right")
-            p.t(x + 43.5, yy, pc((r["v"] / iv["close"] - 1) * 100), 8.2, MUT, ha="right")
-        y1 = y0 + hh + 1.5
-        p.card(x, y1, 45, 15, fc=SEG["scen"][1])
-        p.pill(x + 1.3, y1 + 2, "SCENARIOS", "scen")
-        for j, tint in enumerate(("#dff3e9", "#fbe3e1", "#fdf0cf")):
-            p.rect(x + 1, y1 + 3.5 + j * 3.6, 43, 3.3, tint)
-        for j, sc in enumerate(iv["scenarios"]):
-            yy = y1 + 4.6 + j * 3.6
-            p.t(x + 2, yy, sc["name"], 9, (UP, DN, AMB)[j], "bold")
-            p.t(x + 16, yy, sc["trigger"], 8.6, TXT)
-            p.t(x + 2, yy + 1.7, f"targets {sc['targets']}   |   invalid: {sc['invalid']}", 8, MUT)
-        y2 = y1 + 16.5
-        p.card(x, y2, 45, 13.5, fc=SEG["odds"][1])
-        p.pill(x + 1.3, y2 + 2, "HISTORICAL ODDS", "odds")
-        if iv["probs"]:
-            p.t(x + 1.5, y2 + 4.2, iv["setup"], 7.8, MUT)
-            for j, pr in enumerate(iv["probs"]):
-                yy = y2 + 6.6 + j * 2.2
-                p.t(x + 2, yy, pr["label"], 8.8)
-                p.rect(x + 21, yy - 0.6, 10, 1.2, TRACK)
-                p.rect(x + 21, yy - 0.6, 10 * pr["p"] / 100, 1.2, UP if pr["p"] >= 50 else DN)
-                p.t(x + 43.5, yy, f"{pr['p']:.0f}%   n={pr['n']}", 8.8, TXT, "bold", "right")
-            if iv.get("range"):
-                g = iv["range"]
-                p.t(x + 1.5, y2 + 12.3, f"{g['text']}: {g['med']} ({g['lo']} to {g['hi']})", 7.6, MUT)
-        else:
-            p.t(x + 2, y2 + 6, "Probability table not built yet", 8.8, MUT)
-        if iv.get("exp"):
-            e = iv["exp"]
-            p.t(x + 43.5, y2 + 2, f"VIX 1-sigma {e['horizon']}: {n0(e['lo'])}-{n0(e['hi'])}", 8, MUT, ha="right")
-    y3 = y0 + 4 + lad_n * 1.9 + 33
-    p.card(4, y3, 45, 26, fc=SEG["chart"][1])
-    p.pill(5.3, y3 + 2, f"{main[0]['name']} LAST 40 SESSIONS", "chart")
-    cs = main[0]["candles"]
-    lo, hi = min(c[3] for c in cs), max(c[2] for c in cs)
-    fy = lambda v: y3 + 24.5 - (v - lo) / (hi - lo + 1e-9) * 20
-    for nm, colr in (("R1", DN), ("P", MUT), ("S1", UP)):
-        lvl = main[0]["levels"][nm]
-        if lo <= lvl <= hi:
-            p.ax.plot([6, 47.5], [fy(lvl)] * 2, color=colr, lw=0.6, ls="--")
-            p.t(47.6, fy(lvl) - 0.7, nm, 7, colr, ha="right")
-    for j, (_, o, h, l, c) in enumerate(cs):
-        cx = 6.5 + j * (40.5 / len(cs))
-        cc = UP if c >= o else DN
-        p.ax.plot([cx + 0.35, cx + 0.35], [fy(h), fy(l)], color=cc, lw=0.7)
-        p.rect(cx, min(fy(o), fy(c)), 0.7, max(abs(fy(o) - fy(c)), 0.12), cc)
-    p.card(51, y3, 45, 12, fc=SEG["mtf"][1])
-    p.pill(52.3, y3 + 2, "MULTI-TIMEFRAME", "mtf")
+        v = iv.get("verdict")
+        if not v:
+            continue
+        card = dict(v, items=[(sg["text"], "up" if sg["vote"] > 0 else "down" if sg["vote"] < 0 else "flat") for sg in v["signals"]])
+        move = iv["week"]["chg"] if slot == "weekly" and iv.get("week") else iv["chg"]
+        verdict_card(p, 4 + k * (cw + 1.5), 8.6, cw, 14.4, iv["name"],
+                     (f"{iv['close']:,.0f}  {'week ' if slot == 'weekly' else ''}{pc(move)}", col(move)), card,
+                     f"{v['agreeing']} of {v['total']} signals agree")
+    rg = view.get("regime")
+    if rg:
+        verdict_card(p, 4 + 2 * (cw + 1.5), 8.6, cw, 14.4, "RISK REGIME", None,
+                     {"label": rg["label"], "items": [(r["text"], r["tone"]) for r in rg["reasons"]]}, "India VIX and the overnight global tape")
+    # index strip
+    tiles = idx[:3] + [None]
+    tw = (92 - 3 * 1.5) / 4
+    for k, iv in enumerate(tiles):
+        x, y = 4 + k * (tw + 1.5), 24.6
+        if iv is None:
+            vx = view["vix"]
+            vt = "down" if (vx["close"] or 0) >= 18 else "warn" if (vx["close"] or 0) >= 15 else "up"
+            p.card(x, y, tw, 7.6, fc=TONE[vt][1], ec=EDGE)
+            p.t(x + 1.2, y + 1.7, "INDIA VIX", 7.6, MUT, "bold")
+            p.t(x + tw - 1.2, y + 1.7, sent[0], 7, AMB if sent[0] == "Possible reversal" else TONE[tone_of(sent[0])][0], "bold", "right")
+            p.t(x + 1.2, y + 4.4, f"{vx['close']}" if vx["close"] else "-", 13.5, TXT, "bold")
+            p.t(x + tw - 1.2, y + 4.4, pc(vx["chg"], 1), 9, col(-(vx["chg"] or 0)), "bold", "right")
+            p.t(x + 1.2, y + 6.5, "Rising VIX shown red", 6.6, MUT)
+            continue
+        tn = tone_of(iv["bias"])
+        p.card(x, y, tw, 7.6, fc=TONE[tn][1], ec=EDGE)
+        p.t(x + 1.2, y + 1.7, iv["name"], 7.6, MUT, "bold")
+        p.t(x + tw - 1.2, y + 1.7, iv["bias"], 7.2, TONE[tn][0], "bold", "right")
+        p.t(x + 1.2, y + 4.4, f"{iv['close']:,.0f}", 13.5, TXT, "bold")
+        p.t(x + tw - 1.2, y + 4.4, pc(iv["chg"]), 9, col(iv["chg"]), "bold", "right")
+        p.t(x + 1.2, y + 6.5, f"RSI {iv['rsi']:.0f}", 6.6, MUT)
+        bx, bw = x + 6.5, tw - 11.5
+        p.rect(bx, y + 6.3, bw, 0.4, TRACK)
+        frac = min(max((iv["close"] - iv["lo52"]) / max(iv["hi52"] - iv["lo52"], 1e-9), 0), 1)
+        p.rect(bx + bw * frac - 0.2, y + 5.95, 0.4, 1.1, ACC)
+        p.t(x + tw - 1.2, y + 6.5, "52w", 6.6, MUT, ha="right")
+    # plan cards
     for k, iv in enumerate(main):
-        p.t(72 + k * 12, y3 + 2, iv["name"], 8, MUT, "bold")
-    tfs = [m["tf"] for m in main[0]["mtf"]]
-    for j, tf in enumerate(tfs):
-        yy = y3 + 4.3 + j * 1.5
-        p.t(52.5, yy, tf, 8.5, MUT)
+        plan_card(p, 4 + k * 47, 33.8, 45, plan_h, iv, slot)
+    # timeframes and global cues
+    y = y_low
+    p.card(4, y, 45, 16.6, fc=SEG["mtf"][1])
+    p.pill(5.3, y + 2, "MULTI-TIMEFRAME TREND", "mtf")
+    for k, iv in enumerate(main):
+        p.t(24 + k * 12.5, y + 4.4, iv["name"], 7.4, MUT, "bold")
+    for j, m0 in enumerate(main[0]["mtf"]):
+        yy = y + 6.5 + j * 2
+        p.t(5.8, yy, m0["tf"], 8, MUT)
         for k, iv in enumerate(main):
-            m = next((z for z in iv["mtf"] if z["tf"] == tf), None)
+            m = next((z for z in iv["mtf"] if z["tf"] == m0["tf"]), None)
             if m:
-                p.t(72 + k * 12, yy, f"{m['tag']}  ({m['rsi']:.0f})", 8.5, tagcol(m["tag"]), "bold")
-    p.card(51, y3 + 13.5, 45, 12.5, fc=SEG["glob"][1])
-    p.pill(52.3, y3 + 15.5, "GLOBAL CUES", "glob")
-    for j, g in enumerate(view["globals"][:10]):
-        gx, gy = 52.5 + (j % 2) * 22, y3 + 17.8 + (j // 2) * 1.75
-        p.t(gx, gy, g["name"], 8.3, MUT)
-        p.t(gx + 14.5, gy, f"{g['close']:,.2f}", 8.3, TXT, "bold", "right")
-        p.t(gx + 20, gy, pc(g["chg"], 1), 8.3, col(g["chg"]), ha="right")
+                p.t(24 + k * 12.5, yy, f"{m['tag']} ({m['rsi']:.0f})", 8, TONE[tone_of(m["tag"])][0] if tone_of(m["tag"]) != "flat" else AMB, "bold")
+    p.card(51, y, 45, 16.6, fc=SEG["glob"][1])
+    p.pill(52.3, y + 2, "GLOBAL CUES", "glob")
+    for j, g in enumerate(view["globals"][:12]):
+        gx, gy = 52.8 + (j % 2) * 22, y + 4.6 + (j // 2) * 2
+        p.t(gx, gy, g["name"], 7.8, MUT)
+        p.t(gx + 14.6, gy, f"{g['close']:,.2f}", 7.8, TXT, "bold", "right")
+        p.t(gx + 20.4, gy, pc(g["chg"], 1), 7.8, col(g["chg"]), "bold", "right")
     return p
 
 
@@ -850,7 +984,7 @@ def page_stocks(view):
 def render(view, slot):
     from matplotlib.backends.backend_pdf import PdfPages
     os.makedirs(IMG, exist_ok=True)
-    pages = [page_index(view)]
+    pages = [page_overview(view)]
     if view["sectors"]:
         pages.append(page_market(view))
     if view.get("industries"):
@@ -866,6 +1000,11 @@ def render(view, slot):
             pdf.savefig(pg.fig, facecolor=BG)
             pg.plt.close(pg.fig)
             paths.append(path)
+    # A slot that now has fewer pages must not leave the old extra images behind.
+    k = len(pages) + 1
+    while os.path.exists(os.path.join(IMG, f"{slot}_{k}.png")):
+        os.remove(os.path.join(IMG, f"{slot}_{k}.png"))
+        k += 1
     return paths
 
 
@@ -873,14 +1012,14 @@ def render(view, slot):
 def caption(view, url):
     out = [f"<b>MADDY DESK | {HEAD[view['slot']]}</b>  {view['date']} {view['time_ist']}"]
     for iv in view["indices"][:2]:
-        s = f"<b>{iv['name']}</b> {iv['close']:,.0f} ({iv['chg']:+.2f}%) {iv['bias']}"
+        s = f"<b>{iv['name']}</b> {iv['close']:,.0f} ({iv['chg']:+.2f}%) {(iv.get('verdict') or {}).get('label', iv['bias'])}"
         if iv.get("gap"):
             s += f" | gap {iv['gap']['pct']:+.2f}%"
         s += f" | R1 {iv['levels']['R1']:,.0f} S1 {iv['levels']['S1']:,.0f}"
         if iv["probs"]:
             s += f" | {iv['probs'][0]['label'].lower()} {iv['probs'][0]['p']:.0f}% (n={iv['probs'][0]['n']})"
         out.append(s)
-    out.append(f"VIX {view['vix']['close']} | {view['sentiment'][0]}")
+    out.append(f"VIX {view['vix']['close']} | {view['sentiment'][0]}" + (f" | {view['regime']['label']}" if view.get("regime") else ""))
     for l in view["lists"].values():
         if l["rows"]:
             out.append(f"<b>{l['title']}:</b> " + ", ".join(r["s"] for r in l["rows"][:8]))
@@ -898,10 +1037,15 @@ def telegram(view, paths, pdf, url):
     import requests
     base, cap = f"https://api.telegram.org/bot{token}/", caption(view, url)
     try:
-        files = {f"p{i}": open(p, "rb") for i, p in enumerate(paths)}
-        media = [{"type": "photo", "media": f"attach://p{i}"} for i in range(len(paths))]
-        media[0].update({"caption": cap, "parse_mode": "HTML"})
-        r = requests.post(base + "sendMediaGroup", data={"chat_id": chat, "media": json.dumps(media)}, files=files, timeout=90)
+        if len(paths) == 1:  # an album needs two or more photos; the pre-market plan is a single page
+            with open(paths[0], "rb") as fh:
+                r = requests.post(base + "sendPhoto", data={"chat_id": chat, "caption": cap, "parse_mode": "HTML"},
+                                  files={"photo": fh}, timeout=90)
+        else:
+            files = {f"p{i}": open(p, "rb") for i, p in enumerate(paths)}
+            media = [{"type": "photo", "media": f"attach://p{i}"} for i in range(len(paths))]
+            media[0].update({"caption": cap, "parse_mode": "HTML"})
+            r = requests.post(base + "sendMediaGroup", data={"chat_id": chat, "media": json.dumps(media)}, files=files, timeout=90)
         if not r.ok:
             print("telegram: album failed", r.status_code, "- sending text")
             r = requests.post(base + "sendMessage", data={"chat_id": chat, "text": cap, "parse_mode": "HTML",
@@ -961,7 +1105,7 @@ def main():
         return
     syms, uni, indmap = universe(fake)
     lists, br, inds = {}, None, []
-    if slot != "pre" or True:
+    if SLOT_CONTENT[slot]:
         sd = src.many([s + ".NS" for s in syms], "2y", "1d")
         ath_path = os.path.join(ROOT, "data", "ath.json")
         ath = load(ath_path, {})
@@ -976,7 +1120,10 @@ def main():
             errors.append("stock data unavailable")
         if len(sd) < 0.8 * len(syms):
             errors.append(f"stock data for {len(sd)} of {len(syms)} symbols")
-        lists, br, inds = build_lists(slot, rows), breadth(rows), industry_rows(rows, indmap)
+        want = SLOT_CONTENT[slot]
+        lists = build_lists(slot, rows) if "stocks" in want else {}
+        br = breadth(rows) if "breadth" in want else None
+        inds = industry_rows(rows, indmap) if "industries" in want else []
     glob = []
     for nm, t in GLOBAL.items():
         d = daily.get(t)
@@ -991,7 +1138,11 @@ def main():
             "rates_built": (rates or {}).get("built"), "universe": uni, "errors": errors,
             "vix": {"close": r2(vix), "chg": r2(vixchg), "regime": vix_bucket(vix)},
             "sentiment": list(sentiment(indices[0]["chg"], vixchg)),
-            "indices": indices, "globals": glob, "sectors": sector_rows(daily), "breadth": br, "industries": inds, "lists": lists}
+            "indices": indices, "globals": glob, "sectors": sector_rows(daily) if "sectors" in SLOT_CONTENT[slot] else [],
+            "breadth": br, "industries": inds, "lists": lists}
+    for iv in indices:
+        iv["verdict"] = verdict(iv, view["sentiment"])
+    view["regime"] = risk_regime(view["vix"], glob)
     digest = hashlib.sha1(json.dumps([[i["close"], i["high"], i["low"]] for i in indices]).encode()).hexdigest()
     dup = state.get("hash", {}).get(slot) == digest
     save(os.path.join(OUT, f"{slot}.json"), view)
