@@ -1068,7 +1068,7 @@ def main():
     if str(today) in cfg.get("holidays", []) and "--force" not in sys.argv:
         print("holiday: nothing published")
         return
-    if os.environ.get("TRIGGER") in ("schedule", "push") and slot in SLOT_WINDOW:
+    if os.environ.get("TRIGGER") in ("schedule", "push") and slot in SLOT_WINDOW and "--force" not in sys.argv:
         lo, hi = SLOT_WINDOW[slot]
         if not lo <= now.hour * 60 + now.minute <= hi:
             print(f"{slot} timer started late at {now:%H:%M} IST, outside its window: nothing published")

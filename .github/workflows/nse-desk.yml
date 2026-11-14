@@ -55,7 +55,13 @@ jobs:
             "0 2 * * 6") S=rates;;
             *) S="$PICK";;
           esac
-          if [ "$EVENT" = "push" ]; then S=$(cut -d' ' -f1 trigger/slot.txt | tr -cd 'a-z'); fi
+          F=""
+          if [ "$EVENT" = "push" ]; then
+            S=$(cut -d' ' -f1 trigger/slot.txt | tr -cd 'a-z')
+            # "<slot> refresh" rebuilds that slot's pages without posting to Telegram (after a layout change).
+            if grep -qw refresh trigger/slot.txt; then F="--force --no-telegram"; fi
+          fi
+          echo "flags=$F" >> "$GITHUB_OUTPUT"
           case "$S" in pre|intra|post|weekly|rates) ;; *) S=post;; esac
           echo "slot=$S" >> "$GITHUB_OUTPUT"
           echo "slot: $S"
@@ -70,7 +76,7 @@ jobs:
           DASHBOARD_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/
           SLOT: ${{ steps.pick.outputs.slot }}
           TRIGGER: ${{ github.event_name }}
-          FLAGS: ${{ github.event.inputs.flags }}
+          FLAGS: ${{ github.event.inputs.flags || steps.pick.outputs.flags }}
         run: python scripts/publish.py "$SLOT" $FLAGS
       - name: Commit results
         run: |
