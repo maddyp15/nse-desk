@@ -656,6 +656,13 @@ class Page:
         from matplotlib.patches import Rectangle
         self.ax.add_patch(Rectangle((x, y), w, h, fc=fc, ec="none"))
 
+    def width(self, s, size, weight="normal"):
+        """Width of a text in page units, measured with the font actually installed (fonts differ by machine)."""
+        probe = self.ax.text(0, 0, str(s), fontsize=size, fontweight=weight)
+        px = probe.get_window_extent(renderer=self.fig.canvas.get_renderer()).width
+        probe.remove()
+        return px / self.ax.get_window_extent().width * 100
+
     def t(self, x, y, s, size=10, color=TXT, weight="normal", ha="left"):
         self.ax.text(x, y, str(s), fontsize=size, color=color, fontweight=weight, ha=ha, va="center")
 
@@ -695,7 +702,7 @@ def chips(p, x, y, w, items, size=6.9):
     from matplotlib.patches import FancyBboxPatch
     cx, cy = x, y
     for text, tn in items:
-        cw = len(text) * size * 0.071 + 1.4
+        cw = p.width(text, size, "bold") + 1.4
         if cx + cw > x + w and cx > x:
             cx, cy = x, cy + 1.9
         fg, bg = TONE[tn]
@@ -750,7 +757,9 @@ def plan_card(p, x, y, w, h, iv, slot):
         line += f"   Opening range {n0(iv['or']['lo'])}-{n0(iv['or']['hi'])}"
     elif slot == "weekly" and iv.get("week"):
         line += f"   Week {pc(iv['week']['chg'])}"
-    line += f"   20/50/200-DMA {n0(iv['sma20'])} / {n0(iv['sma50'])} / {n0(iv['sma200'])}"
+    dma = f"   20/50/200-DMA {n0(iv['sma20'])} / {n0(iv['sma50'])} / {n0(iv['sma200'])}"
+    if p.width(line + dma, 7) <= w - 2.8:
+        line += dma
     p.t(x + 1.4, y + 10.1, line, 7, MUT)
     for j, sc in enumerate(iv["scenarios"]):
         sy = y + 11.4 + j * 2.75
