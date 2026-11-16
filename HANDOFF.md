@@ -39,3 +39,10 @@ Actions > nse-desk > Run workflow. Slot: pre, intra, post, weekly or rates. Add 
   removed; monthly CPR moved to the intraday desk; new endpoints /api/market/index-contribution,
   /api/market/fno-buildup, /api/market/monthly-cpr (backend/app/market_internals.py); options desk covers SENSEX.
   Backups: backend/backups/market-desk-2026-11-14/.
+
+## 2026-11-16
+- NSE moved to nseindia.in; index members now come from /api/NextApi/apiClient/marketWatchApi?functionName=getIndicesData
+  (old addresses kept as fallbacks) in Trading OS backend/app/market_internals.py.
+- Options desk and internals go to Telegram from Trading OS itself (backend/app/desk_report.py) at 10:00 and 16:25,
+  as two images and a PDF, because the GitHub publisher has no broker data. Needs Pillow in the backend venv and
+  MDESK_TELEGRAM_TOKEN / MDESK_TELEGRAM_CHAT_ID in backend/.env. Status and "Send now" sit on the Internals tab.
