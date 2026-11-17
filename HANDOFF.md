@@ -46,3 +46,11 @@ Actions > nse-desk > Run workflow. Slot: pre, intra, post, weekly or rates. Add 
 - Options desk and internals go to Telegram from Trading OS itself (backend/app/desk_report.py) at 10:00 and 16:25,
   as two images and a PDF, because the GitHub publisher has no broker data. Needs Pillow in the backend venv and
   MDESK_TELEGRAM_TOKEN / MDESK_TELEGRAM_CHAT_ID in backend/.env. Status and "Send now" sit on the Internals tab.
+
+## 2026-11-17 incident
+- The four Claude scheduled tasks had been removed and GitHub's timer was hours late, so pre-market did not publish.
+  Recreated the tasks (Haiku; each now confirms the slot published). `trigger/slot.txt` with `<slot> force`
+  runs and posts outside the slot window (used to catch up pre at 09:19).
+- Backup trigger in Trading OS (backend/app/desk_trigger.py): a few minutes after each slot it checks
+  docs/data/<slot>.json through the GitHub API and pushes the trigger if today's run is missing.
+  Needs MDESK_GITHUB_TOKEN (fine-grained, nse-desk only, Contents read/write) in backend/.env.
