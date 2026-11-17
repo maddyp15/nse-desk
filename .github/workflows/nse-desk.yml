@@ -60,6 +60,8 @@ jobs:
             S=$(cut -d' ' -f1 trigger/slot.txt | tr -cd 'a-z')
             # "<slot> refresh" rebuilds that slot's pages without posting to Telegram (after a layout change).
             if grep -qw refresh trigger/slot.txt; then F="--force --no-telegram"; fi
+            # "<slot> force" runs and posts even outside the slot's time window (catching up a missed run).
+            if grep -qw force trigger/slot.txt; then F="--force"; fi
           fi
           echo "flags=$F" >> "$GITHUB_OUTPUT"
           case "$S" in pre|intra|post|weekly|rates) ;; *) S=post;; esac
