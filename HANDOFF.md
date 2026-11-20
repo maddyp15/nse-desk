@@ -54,3 +54,9 @@ Actions > nse-desk > Run workflow. Slot: pre, intra, post, weekly or rates. Add 
 - Backup trigger in Trading OS (backend/app/desk_trigger.py): a few minutes after each slot it checks
   docs/data/<slot>.json through the GitHub API and pushes the trigger if today's run is missing.
   Needs MDESK_GITHUB_TOKEN (fine-grained, nse-desk only, Contents read/write) in backend/.env.
+
+## 2026-11-20
+- F&O engulfing lists (`engulfing`, `engulf_lists` in scripts/publish.py): daily in post, weekly in weekly.
+  Body of the last candle fully covers the prior body, opposite colour, volume >= ENGULF_MIN_VOL (1.5) x the
+  20-day / 10-week average. List keys fno_bull_engulf / fno_bear_engulf; columns eng (body x) and pre (prior 5 bars %).
+  F&O symbols: NSE fo_mktlots.csv, fallback config/fno.csv (218 stocks from Kite futures on 2026-11-16).
