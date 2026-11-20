@@ -32,6 +32,8 @@ SECTORS = {"IT": "^CNXIT", "Bank": "^NSEBANK", "Pvt Bank": "NIFTY_PVT_BANK.NS", 
            "Cons Durables": "NIFTY_CONSR_DURBL.NS", "Midcap 100": "NIFTY_MIDCAP_100.NS", "Smallcap 100": "^CNXSC",
            "Nifty 500": "^CRSLDX", "Next 50": "^NSMIDCP"}
 UNIVERSE_URL = "https://nsearchives.nseindia.com/content/indices/ind_nifty500list.csv"
+FNO_URL = "https://nsearchives.nseindia.com/content/fo/fo_mktlots.csv"
+INDEX_UNDERLYINGS = {"NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "NIFTYNXT50", "SENSEX", "BANKEX"}
 FALLBACK = ("RELIANCE TCS HDFCBANK ICICIBANK INFY SBIN BHARTIARTL ITC LT KOTAKBANK AXISBANK HINDUNILVR BAJFINANCE "
             "MARUTI SUNPHARMA TITAN ULTRACEMCO ASIANPAINT NTPC M&M TATASTEEL POWERGRID HCLTECH WIPRO ADANIENT "
             "ADANIPORTS ONGC COALINDIA JSWSTEEL BAJAJFINSV NESTLEIND TECHM GRASIM HINDALCO DRREDDY CIPLA EICHERMOT "
@@ -164,6 +166,28 @@ def universe(fake):
     except Exception:
         pass
     return FALLBACK, "built-in large-cap list", {}
+
+
+def fno_symbols(fake):
+    """Stocks with futures and options on NSE, refreshed from NSE's lot-size file; config/fno.csv is the fallback."""
+    path = os.path.join(ROOT, "config", "fno.csv")
+    if not fake:
+        try:
+            import io
+            import requests
+            r = requests.get(FNO_URL, headers={"User-Agent": "Mozilla/5.0"}, timeout=20)
+            f = pd.read_csv(io.StringIO(r.text))
+            f.columns = [str(c).strip().upper() for c in f.columns]
+            got = sorted({str(x).strip() for x in f["SYMBOL"].dropna()} - INDEX_UNDERLYINGS - {"SYMBOL", "Symbol"})
+            got = [x for x in got if x and not x.startswith("NIFTY")]
+            if len(got) > 150:
+                pd.DataFrame({"Symbol": got}).to_csv(path, index=False)
+        except Exception as exc:
+            print("F&O list refresh failed:", type(exc).__name__)
+    try:
+        return pd.read_csv(path)["Symbol"].astype(str).str.strip().tolist()
+    except Exception:
+        return []
 
 
 # ---------------- indicators ----------------
@@ -534,6 +558,76 @@ def pick(rows, cols):
     return [{k: r.get(k) for k in cols} for r in rows]
 
 
+ENGULF_MIN_VOL = 1.5  # times the average volume of the prior bars
+
+
+def engulfing(d, weekly):
+    """Bullish or bearish engulfing on the last daily (or weekly) bar, with its volume against the average.
+
+    Engulfing: the last candle's real body fully covers the previous candle's body and is of the opposite
+    colour (a red bar swallowed by a bigger green bar is bullish; the reverse is bearish). Volume is the
+    last bar's volume over the mean of the 20 prior days (10 prior weeks). The prior move (last 5 bars before
+    the pattern) says whether it is a reversal after a fall/rise, which is where the pattern carries weight.
+    """
+    if weekly:
+        d = d.resample("W-FRI").agg({"Open": "first", "High": "max", "Low": "min", "Close": "last", "Volume": "sum"}).dropna()
+    look = 10 if weekly else 20
+    if len(d) < look + 7:
+        return None
+    o, h, l, c, v = (d[k].astype(float) for k in ("Open", "High", "Low", "Close", "Volume"))
+    o1, c1, o2, c2 = o.iloc[-2], c.iloc[-2], o.iloc[-1], c.iloc[-1]
+    body1, body2 = abs(c1 - o1), abs(c2 - o2)
+    if body1 <= 0 or body2 <= body1:
+        return None
+    if c1 < o1 and c2 > o2 and o2 <= c1 and c2 >= o1:
+        kind = "bull"
+    elif c1 > o1 and c2 < o2 and o2 >= c1 and c2 <= o1:
+        kind = "bear"
+    else:
+        return None
+    avg = v.iloc[-look - 1:-1].mean()
+    x = v.iloc[-1] / avg if avg else 0
+    if x < ENGULF_MIN_VOL:
+        return None
+    pre = (c.iloc[-2] / c.iloc[-7] - 1) * 100
+    rng = h.iloc[-1] - l.iloc[-1]
+    pos = (c2 - l.iloc[-1]) / rng if rng > 0 else 0.5
+    if kind == "bull":
+        ctx = "After a fall" if pre < -1 else "In an uptrend" if pre > 1 else "Sideways"
+        strong = pos >= 0.7
+    else:
+        ctx = "After a rise" if pre > 1 else "In a downtrend" if pre < -1 else "Sideways"
+        strong = pos <= 0.3
+    return {"kind": kind, "c": r2(c2), "chg": r2((c2 / c1 - 1) * 100), "x": r2(x, 1), "eng": r2(body2 / body1, 1),
+            "pre": r2(pre, 1), "rsi": r2(rsi(c).iloc[-1], 0),
+            "tag": ctx + (", closed at the high" if strong and kind == "bull" else ", closed at the low" if strong else ""),
+            "rank": x * min(body2 / body1, 4) * (1.3 if strong else 1) * (1.3 if ctx.startswith("After") else 1)}
+
+
+def engulf_lists(slot, data, fno):
+    """F&O bullish and bearish engulfing lists: daily for the post-market review, weekly for the weekly review."""
+    weekly = slot == "weekly"
+    found = {"bull": [], "bear": []}
+    for sym in fno:
+        d = data.get(sym + ".NS")
+        if d is None or len(d) < 60:
+            continue
+        e = engulfing(d, weekly)
+        if e:
+            found[e.pop("kind")].append(dict(s=sym, **e))
+    span, unit = ("weekly", "week") if weekly else ("daily", "day")
+    out = {}
+    for kind, word in (("bull", "bullish"), ("bear", "bearish")):
+        rows = sorted(found[kind], key=lambda r: -r["rank"])
+        for r in rows:
+            r.pop("rank")
+        out[f"fno_{kind}_engulf"] = {
+            "title": f"F&O {word} engulfing ({span})",
+            "rule": f"{span.capitalize()} {word} engulfing with volume {ENGULF_MIN_VOL}x+ the {10 if weekly else 20}-{unit} average; strongest first",
+            "rows": rows[:15]}
+    return out
+
+
 def build_lists(slot, rows):
     L, top = {}, 15
     base = ["s", "c", "chg", "x", "cr", "d52", "rsi", "ma", "tag"]
@@ -614,7 +708,7 @@ SEG = {"levels": ("#2f5fd0", "#ffffff"), "scen": ("#0f8a8a", "#f4f8fb"), "odds":
        "chart": ("#1b3260", "#ffffff"), "mtf": ("#1f7fb8", "#e4f0fb"), "glob": ("#b0680f", "#fcf1df"),
        "vix": ("#4a55c7", "#e8ecfd"), "breadth": ("#0b8f61", "#e6f5ee"), "sector": ("#2f5fd0", "#ffffff"),
        "shock": ("#c2410c", "#fff6ef"), "high52": ("#0b8f61", "#f2faf6"), "ath": ("#6b4fc9", "#f5f2fd"),
-       "mbo": ("#1f7fb8", "#eef6fc")}
+       "mbo": ("#1f7fb8", "#eef6fc"), "bull": ("#0b8f61", "#eaf7f0"), "bear": ("#cf3f38", "#fdeeed")}
 HEAD = {"pre": "PRE-MARKET", "intra": "INTRADAY", "post": "POST-MARKET REVIEW", "weekly": "WEEKLY REVIEW"}
 SUB_INDEX = {"pre": "INDEX PLAN FOR TODAY", "intra": "INDEX OUTLOOK", "post": "INDEX PLAN FOR NEXT SESSION",
              "weekly": "INDEX NEXT-WEEK PLAN"}
@@ -936,6 +1030,7 @@ def page_industries(view):
 
 
 LCOL = {"s": ("Stock", 0), "c": ("Close", 22), "chg": ("Chg%", 31), "m": ("1M%", 31), "x": ("Vol x", 39), "pm": ("vs 12M high", 42),
+        "eng": ("Body x", 47), "pre": ("Prior 5 bars", 57),
         "cr": ("Rs cr", 48), "d52": ("vs 52wH", 58), "dath": ("vs ATH", 58), "rsi": ("RSI", 65), "ma": ("MAs", 72), "tag": ("Read", 92),
         "rs": ("RS", 53), "score": ("Score", 63), "grade": ("", 66), "note": ("What the volume says", 92)}
 GRADE_COL = {"A": UP, "B": ACC, "C": AMB, "D": DN}
@@ -951,7 +1046,8 @@ def page_stocks(view):
     for l in lists:
         rows = l["rows"][:12]
         hh = 6 + 2.1 * len(rows)
-        seg = ("shock" if "shockers" in l["title"].lower() else "high52" if "52" in l["title"] else
+        seg = ("bull" if "bullish engulfing" in l["title"] else "bear" if "bearish engulfing" in l["title"] else
+               "shock" if "shockers" in l["title"].lower() else "high52" if "52" in l["title"] else
                "ath" if "All-time" in l["title"] else "mbo")
         p.card(4, y, 92, hh, fc=SEG[seg][1])
         p.pill(5.3, y + 1.9, l["title"].upper(), seg)
@@ -966,8 +1062,14 @@ def page_stocks(view):
                 off, v = LCOL[c][1], r.get(c)
                 if c == "s":
                     p.t(5.5, yy, v, 9, TXT, "bold")
+                elif c == "tag" and seg in ("bull", "bear"):
+                    p.t(5.5 + off * 0.96, yy, v, 8.2, SEG[seg][0] if str(v).startswith("After") else MUT, "bold", "right")
                 elif c == "tag":
                     p.t(5.5 + off * 0.96, yy, v, 8.5, UP if v == "Strong trend" else AMB if v in ("Overbought", "Recovering") else DN, "bold", "right")
+                elif c == "eng":
+                    p.t(5.5 + off * 0.96, yy, f"{v}x", 8.8, TXT, ha="right")
+                elif c == "pre":
+                    p.t(5.5 + off * 0.96, yy, pc(v, 1), 8.8, col(v), ha="right")
                 elif c == "ma":
                     p.t(5.5 + off * 0.96, yy, f"{v}/9", 8.8, UP if v >= 7 else AMB if v >= 5 else DN, ha="right")
                 elif c in ("chg", "m", "pm", "d52", "dath"):
@@ -1114,8 +1216,12 @@ def main():
         return
     syms, uni, indmap = universe(fake)
     lists, br, inds = {}, None, []
+    fno = fno_symbols(fake) if slot in ("post", "weekly") else []
     if SLOT_CONTENT[slot]:
         sd = src.many([s + ".NS" for s in syms], "2y", "1d")
+        extra = [s for s in fno if s + ".NS" not in sd and s not in syms]
+        if extra:
+            sd.update(src.many([s + ".NS" for s in extra], "2y", "1d"))
         ath_path = os.path.join(ROOT, "data", "ath.json")
         ath = load(ath_path, {})
         if slot == "weekly" or not ath:
@@ -1131,6 +1237,8 @@ def main():
             errors.append(f"stock data for {len(sd)} of {len(syms)} symbols")
         want = SLOT_CONTENT[slot]
         lists = build_lists(slot, rows) if "stocks" in want else {}
+        if fno and "stocks" in want:
+            lists.update(engulf_lists(slot, sd, fno))
         br = breadth(rows) if "breadth" in want else None
         inds = industry_rows(rows, indmap) if "industries" in want else []
     glob = []
